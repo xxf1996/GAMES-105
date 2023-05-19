@@ -30,10 +30,41 @@ def part1_calculate_T_pose(bvh_file_path):
     Tips:
         joint_name顺序应该和bvh一致
     """
-    joint_name = None
-    joint_parent = None
-    joint_offset = None
-    return joint_name, joint_parent, joint_offset
+    joint_name: list[str] = []
+    joint_parent: list[int] = []
+    joint_offset: list[list[float]] = []
+
+    with open(bvh_file_path, 'r') as f:
+        parent: str = ''
+        lines = f.readlines()
+        for i in range(len(lines)):
+            if lines[i].startswith('HIERARCHY'):
+                break
+        for line in lines[i+1:]:
+            if line.startswith('MOTION'):
+                break
+            line = line.strip()
+            if line.startswith('JOINT') or line.startswith('ROOT'):
+                infos = line.split()
+                joint_name.append(infos[1])
+                joint_parent.append(-1 if parent == '' else joint_name.index(parent))
+            if line.startswith('End'):
+                infos = line.split()
+                joint_name.append(parent + '_end')
+                joint_parent.append(-1 if parent == '' else joint_name.index(parent))
+            elif line.startswith('{'): # 入栈
+                parent = joint_name[-1]
+            elif line.startswith('}'): # 出栈
+                parent_index = joint_name.index(parent)
+                parent = joint_name[joint_parent[parent_index]] # 找到当前父节点的父节点
+            elif line.startswith('OFFSET'):
+                data = [float(x) for x in line.split()[1:]]
+                joint_offset.append(data)
+
+    print(joint_name)
+    print(joint_parent)
+
+    return joint_name, joint_parent, np.array(joint_offset)
 
 
 def part2_forward_kinematics(joint_name, joint_parent, joint_offset, motion_data, frame_id):
