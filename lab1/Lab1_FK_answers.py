@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
@@ -115,7 +116,7 @@ def part2_forward_kinematics(joint_name: list[str], joint_parent: list[int], joi
     return np.array(joint_positions), np.array(joint_orientations)
 
 
-def part3_retarget_func(T_pose_bvh_path, A_pose_bvh_path):
+def part3_retarget_func(T_pose_bvh_path: str, A_pose_bvh_path: str):
     """
     将 A-pose的bvh重定向到T-pose上
     输入: 两个bvh文件的路径
@@ -125,5 +126,67 @@ def part3_retarget_func(T_pose_bvh_path, A_pose_bvh_path):
         两个bvh的joint name顺序可能不一致哦(
         as_euler时也需要大写的XYZ
     """
-    motion_data = None
-    return motion_data
+    start_time = time.time()
+    T_pose_joint_name, _, _ = part1_calculate_T_pose(T_pose_bvh_path)
+    A_pose_joint_name, _, _ = part1_calculate_T_pose(A_pose_bvh_path)
+    A_pose_motion = load_motion_data(A_pose_bvh_path)
+    # T-pose关节在A-pose中的索引映射
+    A_pose_joint_map: list[int] = [0]
+    A_pose_joint_start: list[int] = [0]
+    motion_data = []
+    l_shoulder_rotation = R.from_euler('XYZ', [0, 0, 45], degrees=True).inv()
+    r_shoulder_rotation = R.from_euler('XYZ', [0, 0, -45], degrees=True).inv()
+
+    channel_index = 0
+    for i in range(1, len(A_pose_joint_name)):
+        A_joint_name = A_pose_joint_name[i]
+        is_end = A_joint_name.endswith('_end')
+        # 由于末端节点没有channel信息，所以不能简单的用当前数组索引进行取值
+        if not is_end:
+            channel_index += 1
+        start_index = 6 + (channel_index - 1) * 3
+        A_pose_joint_map.append(A_pose_joint_name.index(T_pose_joint_name[i]))
+        A_pose_joint_start.append(start_index) # 记录A_pose每个关节对应的channel开始索引，方便进行关节数据映射
+
+    for i in range(len(A_pose_motion)):
+        motion_row: np.ndarray = A_pose_motion[i]
+        retarget_motion_row = np.array(motion_row[0: 6])
+        channel_index = 0
+        for joint_i in range(1, len(A_pose_joint_name)):
+            # A_pose_index = A_pose_joint_map[joint_i]
+            A_joint_name = A_pose_joint_name[joint_i]
+            is_end = A_joint_name.endswith('_end')
+            # 由于末端节点没有channel信息，所以不能简单的用当前数组索引进行取值
+            if is_end:
+                continue # 末端关节没有channel数据
+            channel_index += 1
+            start_index = 6 + (channel_index - 1) * 3
+            A_pose_data = motion_row[start_index: start_index + 3]
+            A_pose_rotation = R.from_euler('XYZ', A_pose_data, degrees=True)
+
+            # 还原A_pose变动的关节（逆变换）
+            if A_joint_name == 'lShoulder':
+                rotation = l_shoulder_rotation * A_pose_rotation
+                retarget_motion_row = np.concatenate((retarget_motion_row, rotation.as_euler('XYZ', degrees=True)), axis=0)
+            elif A_joint_name == 'rShoulder':
+                rotation = r_shoulder_rotation * A_pose_rotation
+                retarget_motion_row = np.concatenate((retarget_motion_row, rotation.as_euler('XYZ', degrees=True)), axis=0)
+            else:
+                retarget_motion_row = np.concatenate((retarget_motion_row, A_pose_data), axis=0)
+
+        remap_motion_row = np.array(retarget_motion_row[0: 6])
+        for joint_i in range(1, len(T_pose_joint_name)):
+            T_joint_name = T_pose_joint_name[joint_i]
+            is_end = T_joint_name.endswith('_end')
+            if is_end:
+                continue # 末端关节没有channel数据
+            A_pose_index = A_pose_joint_map[joint_i]
+            start_index = A_pose_joint_start[A_pose_index]
+            A_pose_data = retarget_motion_row[start_index: start_index + 3]
+            remap_motion_row = np.concatenate((remap_motion_row, A_pose_data), axis=0)
+
+        motion_data.append(remap_motion_row)
+
+    end_time = time.time()
+    print("part3_retarget_func 耗时: {:.2f}秒".format(end_time - start_time))
+    return np.array(motion_data)
