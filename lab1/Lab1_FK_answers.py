@@ -175,6 +175,7 @@ def part3_retarget_func(T_pose_bvh_path: str, A_pose_bvh_path: str):
                 retarget_motion_row = np.concatenate((retarget_motion_row, A_pose_data), axis=0)
 
         remap_motion_row = np.array(retarget_motion_row[0: 6])
+        # 按照T-pose的关节顺序重新映射motion
         for joint_i in range(1, len(T_pose_joint_name)):
             T_joint_name = T_pose_joint_name[joint_i]
             is_end = T_joint_name.endswith('_end')
