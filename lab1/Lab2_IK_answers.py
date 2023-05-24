@@ -5,7 +5,7 @@ from metadata import MetaData
 # 位置精度误差
 LIMIT_DELTA = 0.01
 # 最大迭代次数
-MAX_ITER_NUM = 5000
+MAX_ITER_NUM = 100
 
 def normalize(v: np.ndarray):
     return v / np.linalg.norm(v)
@@ -24,9 +24,8 @@ def part1_inverse_kinematics(meta_data: MetaData, joint_positions: np.ndarray, j
         joint_orientations: 计算得到的关节朝向，是一个numpy数组，shape为(M, 4)，M为关节数
     """
 
-    # TODO: 需要区分自顶向下和自底向上两个不同方向的关节链的处理（自底向上需要逆处理）
     path, path_name, path1, path2 = meta_data.get_path_from_root_to_end()
-    print(path1, path2)
+    print(path, path1, path2)
     end_joint_index = meta_data.joint_name.index(meta_data.end_joint)
     joint_offset = [
         np.array([0.0, 0.0, 0.0])
@@ -50,6 +49,7 @@ def part1_inverse_kinematics(meta_data: MetaData, joint_positions: np.ndarray, j
             joint_index = path[i]
             if i == path_len - 1:
                 continue
+            is_reverse = path[i + 1] in path2
             cur_pos: np.ndarray = joint_positions[joint_index]
             end_pos: np.ndarray = joint_positions[end_joint_index]
             # 当前关节到末端关节的方向
@@ -60,22 +60,46 @@ def part1_inverse_kinematics(meta_data: MetaData, joint_positions: np.ndarray, j
             rotation_axis = normalize(np.cross(cur_direction, next_direction))
             # 基于点乘和cos可以求出两个向量之间的角度
             rotation_angle: float = np.arccos(np.dot(cur_direction, next_direction))
-            joint_orientations[joint_index] = R.from_rotvec(rotation_angle * rotation_axis).as_quat()
+            # if is_reverse:
+            #     rotation_angle *= -1
+            # 这里计算的只是当前需要进行的旋转，因此还需要应用到之前的旋转向量（朝向）上
+            rotation = R.from_rotvec(rotation_angle * rotation_axis)
+            if is_reverse:
+                next_joint = path[i + 1]
+                # 逆向的关节链实际上就是旋转的父关节的朝向，而父关节的朝向先要反向才能基于当前关节点的位置进行旋转，旋转完后就再反向变回父关节的朝向
+                cur_orientation = R.from_quat(joint_orientations[next_joint]).inv()
+                joint_orientations[next_joint] = (rotation * cur_orientation).inv().as_quat()
+            else:
+                cur_orientation = R.from_quat(joint_orientations[joint_index])
+                joint_orientations[joint_index] = (rotation * cur_orientation).as_quat()
 
-            parent_pos = cur_pos
-            parent_orientation = R.from_quat(joint_orientations[joint_index])
+            prev_pos = cur_pos
+            prev_orientation = R.from_quat(joint_orientations[joint_index])
 
             # NOTICE: 求出当前关节的新朝向后，需要基于FK方法更新所有后续子关节的位置（主要就是要得到最新的末端关节位置）
             for j in range(i + 1, path_len):
                 joint_index = path[j]
-                cur_offset: np.ndarray = joint_offset[joint_index]
-                cur_pos = parent_pos + parent_orientation.apply(cur_offset)
+                is_reverse = joint_index in path2
+                cur_orientation = R.from_quat(joint_orientations[joint_index])
+                if is_reverse:
+                    child_path = path[j - 1]
+                    child_offset = joint_offset[child_path]
+                    # 根据FK计算公式可以倒推父关节位置
+                    cur_pos = prev_pos - cur_orientation.apply(child_offset)
+                    # 由于是逆向的改变，因此父关节的朝向也发生了变化（因为并不能基于FK的原方向进行自动影响）
+                    if j != i + 1 and j != 0:
+                        cur_orientation = rotation * cur_orientation.inv()
+                        joint_orientations[joint_index] = cur_orientation.inv().as_quat()
+                else:
+                    cur_offset: np.ndarray = joint_offset[joint_index]
+                    cur_pos = prev_pos + prev_orientation.apply(cur_offset)
                 joint_positions[joint_index] = cur_pos
-                parent_orientation = R.from_quat(joint_orientations[joint_index])
-                parent_pos = cur_pos
+                # joint_orientations[joint_index] = cur_orientation.as_quat()
+                prev_orientation = cur_orientation
+                prev_pos = cur_pos
 
     # NOTICE: 对其他的关节位置进行一遍FK计算，确保其他关节位置同时发生改变
-    for i in range(1, len(meta_data.joint_name)):
+    for i in range(0, len(meta_data.joint_name)):
         if i in path:
             continue
         parent_index = meta_data.joint_parent[i]
@@ -104,5 +128,5 @@ def bonus_inverse_kinematics(meta_data, joint_positions, joint_orientations, lef
     """
     输入左手和右手的目标位置，固定左脚，完成函数，计算逆运动学
     """
-    
+
     return joint_positions, joint_orientations
