@@ -13,7 +13,7 @@ def part1_simple(viewer, target_pos):
     meta_data = MetaData(joint_name, joint_parent, joint_initial_position, 'RootJoint', 'lWrist_end')
     joint_position = viewer.get_joint_positions()
     joint_orientation = viewer.get_joint_orientations()
-    
+
     joint_position, joint_orientation = part1_inverse_kinematics(meta_data, joint_position, joint_orientation, target_pos)
     viewer.show_pose(joint_name, joint_position, joint_orientation)
     viewer.run()
@@ -80,7 +80,7 @@ def part2(viewer, bvh_name):
         def update_func(self, viewer):
             joint_position, joint_orientation = part2_forward_kinematics(
                 self.joint_name, self.joint_parent, self.joint_offset, self.motion_data, self.current_frame)
-            joint_position, joint_orientation = part2_inverse_kinematics(self.meta_data, joint_position, joint_orientation, 0.1, 0.3, 1.4)
+            joint_position, joint_orientation = part2_inverse_kinematics(self.meta_data, joint_position, joint_orientation, 0.5, 0.3, 1.6)
             viewer.show_pose(self.joint_name, joint_position, joint_orientation)
             self.current_frame = (self.current_frame + 1) % self.motion_data.shape[0]
     handle = UpdateHandle(meta_data, motion_data, bvh_offset)
@@ -125,10 +125,10 @@ def main():
     # part1
     # part1_simple(viewer, np.array([0.17, 1.45, 0.57]))
     # part1_hard(viewer, np.array([0.5, 0.5, 0.5]))
-    part1_animation(viewer, np.array([0.5, 0.5, 0.5]))
+    # part1_animation(viewer, np.array([0.5, 0.5, 0.5]))
 
     # part2
-    # part2(viewer, 'data/walk60.bvh')
+    part2(viewer, 'data/walk60.bvh')
 
     # bonus(viewer, np.array([0.5, 0.5, 0.5]), np.array([0, 0.5, 0.5]))
 

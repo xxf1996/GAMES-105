@@ -117,11 +117,79 @@ def part1_inverse_kinematics(meta_data: MetaData, joint_positions: np.ndarray, j
 
     return joint_positions, joint_orientations
 
-def part2_inverse_kinematics(meta_data, joint_positions, joint_orientations, relative_x, relative_z, target_height):
+def part2_inverse_kinematics(meta_data: MetaData, joint_positions: np.ndarray, joint_orientations: np.ndarray, relative_x: float, relative_z: float, target_height: float):
     """
     输入lWrist相对于RootJoint前进方向的xz偏移，以及目标高度，IK以外的部分与bvh一致
     """
-    
+
+    root_pos: np.ndarray = joint_positions[meta_data.joint_name.index(meta_data.root_joint)]
+    wrist_index = meta_data.joint_name.index("lWrist_end")
+    shouler_index = meta_data.joint_name.index("lShoulder")
+    target_pos = np.array([root_pos[0] + relative_x, target_height, root_pos[2] + relative_z])
+    path = [wrist_index]
+    parent_index = meta_data.joint_parent[wrist_index]
+    joint_offset = [
+        np.array([0.0, 0.0, 0.0])
+    ]
+
+    for i in range(1, len(meta_data.joint_parent)):
+        cur_pos = meta_data.joint_initial_position[i]
+        parent_pos: np.ndarray = meta_data.joint_initial_position[meta_data.joint_parent[i]]
+        joint_offset.append(cur_pos - parent_pos) # 基于初始的全局位置计算每个关节在父关节局部坐标系中的相对位移
+
+    while parent_index > -1 and parent_index != shouler_index:
+        path.append(parent_index)
+        parent_index = meta_data.joint_parent[parent_index]
+
+    path = list(reversed(path))
+    path_len = len(path)
+
+    # 实际上就是求解lShoulder到lWrist_end这条关节链的IK（lShoulder为根关节，lWrist_end为目标关节）
+    for _ in range(MAX_ITER_NUM):
+        end_pos: np.ndarray = joint_positions[wrist_index]
+        target_diff = np.linalg.norm(end_pos - target_pos)
+        # 判断指定末端关节和目标点的距离是否满足误差
+        if (target_diff < LIMIT_DELTA):
+            break
+
+        # 索引从1开始，避免对指定root关节（位置和朝向）进行改变
+        # 基于CCD方法进行优化求解
+        for i in range(path_len):
+            joint_index = path[i]
+            if i == path_len - 1:
+                continue
+            cur_pos: np.ndarray = joint_positions[joint_index]
+            end_pos: np.ndarray = joint_positions[wrist_index]
+            # 当前关节到末端关节的方向
+            cur_direction = normalize(end_pos - cur_pos)
+            # 当前关节到目标点的方向（基于CCD求IK的本质可知，实际上就是将关节到末端关节之间的轴旋转到该方向，即为该轴方向上的最近距离点）
+            next_direction = normalize(target_pos - cur_pos)
+            # 叉乘方向就是旋转轴
+            rotation_axis = normalize(np.cross(cur_direction, next_direction))
+            # 基于点乘和cos可以求出两个向量之间的角度
+            rotation_angle: float = np.arccos(np.dot(cur_direction, next_direction))
+            # 这里计算的只是当前需要进行的旋转，因此还需要应用到之前的旋转向量（朝向）上
+            rotation = R.from_rotvec(rotation_angle * rotation_axis)
+            cur_orientation = R.from_quat(joint_orientations[joint_index])
+            try:
+                joint_orientations[joint_index] = (rotation * cur_orientation).as_quat()
+            except:
+                joint_orientations[joint_index] = cur_orientation.as_quat()
+
+            prev_pos = cur_pos
+            prev_orientation = R.from_quat(joint_orientations[joint_index])
+
+            # NOTICE: 求出当前关节的新朝向后，需要基于FK方法更新所有后续子关节的位置（主要就是要得到最新的末端关节位置）
+            for j in range(i + 1, path_len):
+                joint_index = path[j]
+                cur_orientation = R.from_quat(joint_orientations[joint_index])
+                cur_offset: np.ndarray = joint_offset[joint_index]
+                cur_pos = prev_pos + prev_orientation.apply(cur_offset)
+                joint_positions[joint_index] = cur_pos
+                # joint_orientations[joint_index] = cur_orientation.as_quat()
+                prev_orientation = cur_orientation
+                prev_pos = cur_pos
+
     return joint_positions, joint_orientations
 
 def bonus_inverse_kinematics(meta_data, joint_positions, joint_orientations, left_target_pose, right_target_pose):
