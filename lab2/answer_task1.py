@@ -209,8 +209,8 @@ class BVHMotion():
         Rxz = np.zeros_like(rotation)
 
         r = R.from_quat(rotation)
-        [yAngle] = r.as_euler('yzx')
-        ry = R.from_rotvec(np.array([0, 1, 0]) * yAngle)
+        angle = r.as_euler("yzx")
+        ry = R.from_rotvec(np.array([0, 1, 0]) * angle[1])
         Ry = ry.as_quat()
         rxz = ry.inv() * r
         Rxz = rxz.as_quat()
@@ -273,7 +273,6 @@ def blend_two_motions(bvh_motion1: BVHMotion, bvh_motion2: BVHMotion, alpha: np.
     res.joint_rotation = np.zeros((len(alpha), res.joint_rotation.shape[1], res.joint_rotation.shape[2]))
     res.joint_rotation[...,3] = 1.0
 
-    # TODO: 你的代码
     motion1_len = float(bvh_motion1.motion_length - 1)
     motion2_len = float(bvh_motion2.motion_length - 1)
     motion_len = len(alpha)
@@ -319,7 +318,7 @@ def build_loop_motion(bvh_motion):
     return build_loop_motion(res)
 
 # part4
-def concatenate_two_motions(bvh_motion1, bvh_motion2, mix_frame1, mix_time):
+def concatenate_two_motions(bvh_motion1: BVHMotion, bvh_motion2: BVHMotion, mix_frame1: int, mix_time: int):
     '''
     将两个bvh动作平滑地连接起来，mix_time表示用于混合的帧数
     混合开始时间是第一个动作的第mix_frame1帧
@@ -328,11 +327,38 @@ def concatenate_two_motions(bvh_motion1, bvh_motion2, mix_frame1, mix_time):
         你可能需要用到BVHMotion.sub_sequence 和 BVHMotion.append
     '''
     res = bvh_motion1.raw_copy()
-    
-    # TODO: 你的代码
-    # 下面这种直接拼肯定是不行的(
-    res.joint_position = np.concatenate([res.joint_position[:mix_frame1], bvh_motion2.joint_position], axis=0)
-    res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], bvh_motion2.joint_rotation], axis=0)
-    
+
+    # 计算出插值开始帧根关节的位置和旋转
+    start_postion = bvh_motion1.joint_position[mix_frame1, 0, [0, 1, 2]]
+    (start_Ry, _) = bvh_motion1.decompose_rotation_with_yaxis(bvh_motion1.joint_rotation[mix_frame1, 0])
+    Ry = R.from_quat(start_Ry)
+    start_face = Ry.apply(np.array([0, 0, 1]))
+    # 对第二个动作进行位移和朝向的调整
+    bvh_motion2_transformed = bvh_motion2.translation_and_rotation(0, start_postion[[0, 2]], start_face[[0, 2]])
+    # 硬拼接
+    res.joint_position = np.concatenate([res.joint_position[:mix_frame1], bvh_motion2_transformed.joint_position], axis=0)
+    res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], bvh_motion2_transformed.joint_rotation], axis=0)
+
+    # 插值段内进行线性插值
+    for i in range(mix_time):
+        ratio = float(i) / float(mix_time - 1) # [0, 1]
+        motion1_index = mix_frame1 + i
+        motion2_index = i
+        res.joint_position[motion1_index] = bvh_motion1.joint_position[motion1_index] * (1.0 - ratio) + bvh_motion2_transformed.joint_position[motion2_index] * ratio
+        for joint_i in range(bvh_motion1.joint_rotation.shape[1]):
+            q0 = bvh_motion1.joint_rotation[motion1_index, joint_i]
+            q1 = bvh_motion2_transformed.joint_rotation[motion2_index, joint_i]
+            angle = np.arccos(np.dot(q0, q1))
+            # 避免夹角过大插值出现奇异值，利用单位四元数的特性进行反向
+            if np.abs(angle) > np.pi * 0.5:
+                q0 = -q0
+            # 简单线性插值
+            q = (1.0 - ratio) * q0 + ratio * q1
+            q = q / np.linalg.norm(q)
+            # print(q0, q1, q)
+            res.joint_rotation[motion1_index, joint_i] = q
+
+
+
     return res
 
