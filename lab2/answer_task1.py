@@ -175,7 +175,7 @@ class BVHMotion():
     @property
     def motion_length(self):
         return self.joint_position.shape[0]
-    
+
     
     def sub_sequence(self, start, end):
         '''
@@ -243,6 +243,9 @@ class BVHMotion():
         # rotation_angle = np.arctan(-x / z)
         rotation_angle = np.arctan2(x, z) # TODO: 这里x轴和z轴的关系难道不应该取负值吗？
         print("rotation_angle: ", rotation_angle)
+        if rotation_angle == 0.0:
+            return res
+
         delta_R = R.from_rotvec(np.array([0, 1, 0]) * rotation_angle)
         init_pos = res.joint_position[frame_num, 0, [0, 1, 2]]
         for i in range(0, res.joint_rotation.shape[0]):
@@ -256,7 +259,7 @@ class BVHMotion():
         return res
 
 # part2
-def blend_two_motions(bvh_motion1, bvh_motion2, alpha):
+def blend_two_motions(bvh_motion1: BVHMotion, bvh_motion2: BVHMotion, alpha: np.ndarray):
     '''
     blend两个bvh动作
     假设两个动作的帧数分别为n1, n2
@@ -271,7 +274,34 @@ def blend_two_motions(bvh_motion1, bvh_motion2, alpha):
     res.joint_rotation[...,3] = 1.0
 
     # TODO: 你的代码
-    
+    motion1_len = float(bvh_motion1.motion_length - 1)
+    motion2_len = float(bvh_motion2.motion_length - 1)
+    motion_len = len(alpha)
+    for i in range(motion_len):
+        ratio = float(i) / float(motion_len - 1)
+        motion1_index = int(motion1_len * ratio)
+        motion2_index = int(motion2_len * ratio)
+        a = alpha[i]
+        res.joint_position[i] = bvh_motion1.joint_position[motion1_index] * (1.0 - a) + bvh_motion2.joint_position[motion2_index] * a
+        # res.joint_rotation[i] = bvh_motion1.joint_rotation[motion1_index] * (1.0 - a) + bvh_motion2.joint_rotation[motion2_index] * a
+        # for joint_i in range(bvh_motion1.joint_rotation.shape[1]):
+        #     res.joint_rotation[i, joint_i] = res.joint_rotation[i, joint_i] / np.linalg.norm(res.joint_rotation[i, joint_i]) # 转化为单位四元数
+        for joint_i in range(bvh_motion1.joint_rotation.shape[1]):
+            q0 = bvh_motion1.joint_rotation[motion1_index, joint_i]
+            q1 = bvh_motion2.joint_rotation[motion2_index, joint_i]
+            angle = np.arccos(np.dot(q0, q1))
+            # 避免夹角过大插值出现奇异值，利用单位四元数的特性进行反向
+            if np.abs(angle) > np.pi * 0.5:
+                q0 = -q0
+                # angle = np.arccos(np.dot(q0, q1))
+            # 基于slerp对四元数进行插值
+            # q = np.sin((1.0 - a) * angle) / np.sin(angle) * q0 + np.sin(a * angle) / np.sin(angle) * q1
+            # 简单线性插值
+            q = (1.0 - a) * q0 + a * q1
+            q = q / np.linalg.norm(q)
+            # print(q0, q1, q)
+            res.joint_rotation[i, joint_i] = q
+
     return res
 
 # part3
