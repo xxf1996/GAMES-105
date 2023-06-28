@@ -122,7 +122,7 @@ class BVHMotion():
                 rotation = motion_data[:, cur_channel+3:cur_channel+6]
             self.joint_rotation[:, i, :] = R.from_euler('XYZ', rotation,degrees=True).as_quat()
             cur_channel += self.joint_channel[i]
-        
+
         return
 
     def batch_forward_kinematics(self, joint_position = None, joint_rotation = None):
@@ -145,7 +145,7 @@ class BVHMotion():
         
         for i in range(len(self.joint_name)):
             pi = self.joint_parent[i]
-            parent_orientation = R.from_quat(joint_orientation[:,pi,:]) 
+            parent_orientation = R.from_quat(joint_orientation[:,pi,:])
             joint_translation[:, i, :] = joint_translation[:, pi, :] + \
                 parent_orientation.apply(joint_position[:, i, :])
             joint_orientation[:, i, :] = (parent_orientation * R.from_quat(joint_rotation[:, i, :])).as_quat()
@@ -200,19 +200,25 @@ class BVHMotion():
     
     #--------------------- 你的任务 -------------------- #
     
-    def decompose_rotation_with_yaxis(self, rotation):
+    def decompose_rotation_with_yaxis(self, rotation: np.ndarray):
         '''
         输入: rotation 形状为(4,)的ndarray, 四元数旋转
         输出: Ry, Rxz，分别为绕y轴的旋转和转轴在xz平面的旋转，并满足R = Ry * Rxz
         '''
         Ry = np.zeros_like(rotation)
         Rxz = np.zeros_like(rotation)
-        # TODO: 你的代码
-        
+
+        r = R.from_quat(rotation)
+        [yAngle] = r.as_euler('yzx')
+        ry = R.from_rotvec(np.array([0, 1, 0]) * yAngle)
+        Ry = ry.as_quat()
+        rxz = ry.inv() * r
+        Rxz = rxz.as_quat()
+
         return Ry, Rxz
-    
+
     # part 1
-    def translation_and_rotation(self, frame_num, target_translation_xz, target_facing_direction_xz):
+    def translation_and_rotation(self, frame_num: int, target_translation_xz: np.ndarray, target_facing_direction_xz: np.ndarray):
         '''
         计算出新的joint_position和joint_rotation
         使第frame_num帧的根节点平移为target_translation_xz, 水平面朝向为target_facing_direction_xz
@@ -231,7 +237,22 @@ class BVHMotion():
         # 比如说，你可以这样调整第frame_num帧的根节点平移
         offset = target_translation_xz - res.joint_position[frame_num, 0, [0,2]]
         res.joint_position[:, 0, [0,2]] += offset
-        # TODO: 你的代码
+        # root_R = R.from_quat(res.joint_rotation[frame_num, 0])
+        target_facing_direction_xz = target_facing_direction_xz / np.linalg.norm(target_facing_direction_xz)
+        [x, z] = target_facing_direction_xz
+        # rotation_angle = np.arctan(-x / z)
+        rotation_angle = np.arctan2(x, z) # TODO: 这里x轴和z轴的关系难道不应该取负值吗？
+        print("rotation_angle: ", rotation_angle)
+        delta_R = R.from_rotvec(np.array([0, 1, 0]) * rotation_angle)
+        init_pos = res.joint_position[frame_num, 0, [0, 1, 2]]
+        for i in range(0, res.joint_rotation.shape[0]):
+            origin_R = R.from_quat(res.joint_rotation[i, 0])
+            origin_pos = res.joint_position[i, 0, [0, 1, 2]]
+            offset_pos = delta_R.apply(origin_pos - init_pos)
+            res.joint_rotation[i, 0] = (delta_R * origin_R).as_quat()
+            # NOTICE: 由于旋转后之前的平移矢量也发生了旋转，因此需要重新计算平移矢量！
+            res.joint_position[i, 0, [0,2]] = np.array([offset_pos[0] + init_pos[0], offset_pos[2] + init_pos[2]])
+
         return res
 
 # part2
