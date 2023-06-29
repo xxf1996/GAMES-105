@@ -242,7 +242,7 @@ class BVHMotion():
         [x, z] = target_facing_direction_xz
         # rotation_angle = np.arctan(-x / z)
         rotation_angle = np.arctan2(x, z) # TODO: 这里x轴和z轴的关系难道不应该取负值吗？
-        print("rotation_angle: ", rotation_angle)
+        # print("rotation_angle: ", rotation_angle)
         if rotation_angle == 0.0:
             return res
 
