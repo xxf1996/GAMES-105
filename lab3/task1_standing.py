@@ -10,7 +10,7 @@ class PDController:
         self.cnt = 0
         self.get_pose = None
         pass
-    
+
     def apply_pd_torque(self):
         pose = self.get_pose(self.cnt)
         torque = part1_cal_torque(pose, self.physics_info)
@@ -37,8 +37,8 @@ class PDController:
         
 def part1_pd_control(viewer, setting=0):
     
-    motion_list = [r'motion_material\physics_motion\long_walk.bvh', r"motion_material\idle.bvh", r"motion_material\walkF.bvh"]
-    
+    motion_list = [r'motion_material/physics_motion/long_walk.bvh', r"motion_material/idle.bvh", r"motion_material/walkF.bvh"]
+
     motion = BVHMotion(motion_list[setting])
     motion.adjust_joint_name(viewer.joint_name)
     
@@ -47,7 +47,7 @@ def part1_pd_control(viewer, setting=0):
                                                                            root_pos = viewer.root_pos,
                                                                            )
     viewer.set_pose(motion.joint_name ,joint_translation[0], joint_orientation[0])
-    
+
     pd_controller = PDController(viewer)
     pd_controller.get_pose = lambda x: motion.joint_rotation[0]
     viewer.pre_simulation_func = pd_controller.apply_pd_torque
