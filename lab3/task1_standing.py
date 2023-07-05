@@ -59,7 +59,7 @@ def part2_root_force(viewer, setting=0):
     setting 1: track 整个动作
     '''
     
-    motion_list = [r"motion_material\physics_motion\long_walk.bvh"]
+    motion_list = [r"motion_material/physics_motion/long_walk.bvh"]
     motion = BVHMotion(motion_list[0])
     motion.adjust_joint_name(viewer.joint_name)
     pos = viewer.root_pos
@@ -72,13 +72,13 @@ def part2_root_force(viewer, setting=0):
     viewer.set_pose(motion.joint_name ,joint_translation[0], joint_orientation[0])
     
     pd_controller = PDController(viewer)
-    idx_map = lambda x: x//viewer.substep if setting == 1 else 0
+    idx_map = lambda x: x//viewer.substep if setting == 1 else setting
     pd_controller.get_pose = lambda x: (motion.joint_position[idx_map(x)], motion.joint_rotation[idx_map(x)], setting)
     viewer.pre_simulation_func = pd_controller.apply_root_force_and_torque
     pass
 
 def part3_static_balance(viewer, setting):
-    motion_list = [r"motion_material\physics_motion\long_walk.bvh"]
+    motion_list = [r"motion_material/physics_motion/long_walk.bvh"]
     motion = BVHMotion(motion_list[setting])
     motion.adjust_joint_name(viewer.joint_name)
     pos = viewer.root_pos
@@ -94,11 +94,11 @@ def part3_static_balance(viewer, setting):
     pass
 
 def main():
-    viewer = SimpleViewer(True) 
+    viewer = SimpleViewer(True)
     # viewer.show_axis_frame()
     
-    part1_pd_control(viewer, 0) # 数字代表不同的测试setting
-    # part2_root_force(viewer, 0)
+    # part1_pd_control(viewer, 0) # 数字代表不同的测试setting
+    part2_root_force(viewer, 1)
     # part3_static_balance(viewer, 0)
     viewer.run()
     

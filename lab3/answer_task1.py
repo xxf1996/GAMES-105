@@ -25,8 +25,8 @@ def part1_cal_torque(pose: np.ndarray, physics_info: PhysicsInfo, **kargs):
         global_torque: (20,3)的numpy数组，表示每个关节的全局坐标下的目标力矩，根节点力矩会被后续代码无视
     '''
     # ------一些提示代码，你可以随意修改------------#
-    kp = kargs.get('kp', 500.0) # 需要自行调整kp和kd！ 而且也可以是一个数组，指定每个关节的kp和kd
-    kd = kargs.get('kd', 200.0) # NOTICE: 这里kd值太小时，抖动很明显
+    total_kp = kargs.get('kp', 500.0) # 需要自行调整kp和kd！ 而且也可以是一个数组，指定每个关节的kp和kd
+    total_kd = kargs.get('kd', 200.0) # NOTICE: 这里kd值太小时，抖动很明显
     parent_index = physics_info.parent_index
     joint_name = physics_info.joint_name
     joint_orientation = physics_info.get_joint_orientation()
@@ -52,12 +52,23 @@ def part1_cal_torque(pose: np.ndarray, physics_info: PhysicsInfo, **kargs):
 
     # joint_l = np.array([1, 0, 0])
 
-    for i in range(1, len(pose)):
+    for i in range(0, len(pose)):
+        kp = kargs.get("kp_{}".format(i), total_kp)
+        kd = kargs.get("kd_{}".format(i), total_kd)
         joint_parent = parent_index[i]
-        parent_orientation = R.from_quat(joint_orientation[joint_parent])
         cur_orientation = R.from_quat(joint_orientation[i])
-        local_rotation = parent_orientation.inv() * cur_orientation
         target_quat = pose[i]
+        # root关节需要特殊处理（因为没有父关节）
+        if joint_parent == -1:
+            angle = np.arccos(np.dot(target_quat, cur_orientation.as_quat()))
+            if np.abs(angle) > np.pi * 0.5:
+                target_quat = -target_quat # 基于单位四元数的特性进行负向取值
+            target_rotation = R.from_quat(target_quat)
+            rotation_error = convert_rotation_to_axis_angle((target_rotation.inv() * cur_orientation).as_quat())
+            global_torque[i] = kp * rotation_error - kd * joint_avel[i]
+            continue
+        parent_orientation = R.from_quat(joint_orientation[joint_parent])
+        local_rotation = parent_orientation.inv() * cur_orientation
         angle = np.arccos(np.dot(target_quat, local_rotation.as_quat()))
         # 这里需要判断四元数的夹角，因为有的目标姿势可能跟当前姿势夹角差别大，导致用力不对
         if np.abs(angle) > np.pi * 0.5:
@@ -71,12 +82,12 @@ def part1_cal_torque(pose: np.ndarray, physics_info: PhysicsInfo, **kargs):
         local_avel = cur_orientation.inv().apply(joint_avel[i])
         avel_error = 0 - local_avel
         local_torque = kp * rotation_error + kd * avel_error
-        global_torque_val = np.clip(cur_orientation.apply(local_torque), -500, 500) # 避免关节力矩过大
+        global_torque_val = np.clip(cur_orientation.apply(local_torque), -10000, 10000) # 避免关节力矩过大
         global_torque[i] = global_torque_val
 
     return global_torque
 
-def part2_cal_float_base_torque(target_position, pose, physics_info, **kargs):
+def part2_cal_float_base_torque(target_position: np.ndarray, pose: np.ndarray, physics_info: PhysicsInfo, **kargs):
     '''
     输入： target_position: (3,)的numpy数组，表示根节点的目标位置，其余同上
     输出： global_root_force: (3,)的numpy数组，表示根节点的全局坐标下的辅助力
@@ -85,11 +96,12 @@ def part2_cal_float_base_torque(target_position, pose, physics_info, **kargs):
         1. 你需要自己计算kp和kd，并且可以通过kargs调整part1中的kp和kd
         2. global_torque[0]在track静止姿态时会被无视，但是track走路时会被加到根节点上，不然无法保持根节点朝向
     '''
-    global_torque = part1_cal_torque(pose, physics_info)
-    kp = kargs.get('root_kp', 4000) # 需要自行调整root的kp和kd！
-    kd = kargs.get('root_kd', 20)
+    # TODO: 系数调整（太难了，完全就是炼丹）
+    kp = kargs.get('root_kp', 4500.0) # 需要自行调整root的kp和kd！
+    kd = kargs.get('root_kd', 50.0)
+    global_torque = part1_cal_torque(pose, physics_info, kp_0 = 5000.0, kd_0 = 200.0, kp = 500.0, kd = 50.0)
     root_position, root_velocity = physics_info.get_root_pos_and_vel()
-    global_root_force = np.zeros((3,))
+    global_root_force = kp * (target_position - root_position) - kd * root_velocity
     return global_root_force, global_torque
 
 def part3_cal_static_standing_torque(bvh: BVHMotion, physics_info):
