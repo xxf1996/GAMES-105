@@ -82,7 +82,7 @@ def part1_cal_torque(pose: np.ndarray, physics_info: PhysicsInfo, **kargs):
         local_avel = cur_orientation.inv().apply(joint_avel[i])
         avel_error = 0 - local_avel
         local_torque = kp * rotation_error + kd * avel_error
-        global_torque_val = np.clip(cur_orientation.apply(local_torque), -10000, 10000) # 避免关节力矩过大
+        global_torque_val = np.clip(cur_orientation.apply(local_torque), -800, 800) # 避免关节力矩过大
         global_torque[i] = global_torque_val
 
     return global_torque
@@ -104,23 +104,59 @@ def part2_cal_float_base_torque(target_position: np.ndarray, pose: np.ndarray, p
     global_root_force = kp * (target_position - root_position) - kd * root_velocity
     return global_root_force, global_torque
 
-def part3_cal_static_standing_torque(bvh: BVHMotion, physics_info):
+def part3_cal_static_standing_torque(bvh: BVHMotion, physics_info: PhysicsInfo):
     '''
     输入： bvh: BVHMotion类，包含了当前的动作信息，参见bvh_loader.py
     其余同上
-    Tips: 
+    Tips:
         只track第0帧就能保持站立了
         为了保持平衡可以把目标的根节点位置适当前移，比如把根节点位置和左右脚的中点加权平均
         为了仿真稳定最好不要在Toe关节上加额外力矩
     '''
     tar_pos = bvh.joint_position[0][0]
     pose = bvh.joint_rotation[0]
-    joint_name = physics_info.joint_name
-    
+    joint_name: list[str] = physics_info.joint_name
+    # apply_joints = ["lHip", "lKnee", "lAnkle", "rHip", "rKnee", "rAnkle"]
+    # 需要应用反馈关节力矩的关节列表
+    apply_joints = ["lHip", "lKnee", "rHip", "rKnee"]
+    kp = 11000.0
+    kd = 500.0
     joint_positions = physics_info.get_joint_translation()
-    # 适当前移
-    tar_pos = tar_pos * 0.8 + joint_positions[9] * 0.1 + joint_positions[10] * 0.1
+    joint_vel = physics_info.get_body_velocity()
+    joint_mass = physics_info.get_body_mass()
+    # joint_orientation = physics_info.get_joint_orientation()
+    # 基于质量的加权平均速度
+    com_vel = np.array([0.0, 0.0, 0.0])
+    # 质心位置
+    com = np.array([0.0, 0.0, 0.0])
+    total_mass = 0.0
+    for i in range(len(joint_name)):
+        # cur_orientation = R.from_quat(joint_orientation[i])
+        mass = joint_mass[i]
+        pos = joint_positions[i]
+        vel = joint_vel[i]
+        com_vel += mass * vel
+        com += mass * pos
+        total_mass += mass
 
-    torque = np.zeros((20,3))
+    com_vel = com_vel / total_mass
+    com = com / total_mass
+    # 适当前移
+    tar_pos[[0, 2]] = tar_pos[[0, 2]] * 0.6 + joint_positions[9][[0, 2]] * 0.2 + joint_positions[10][[0, 2]] * 0.2
+    # tar_pos[1] = 0
+    root_pos = joint_positions[0]
+    # root_pos[1] = 0
+
+    torque = part1_cal_torque(pose, physics_info)
+    # 雅克比虚拟反馈力
+    feedback_force = kp * (tar_pos - com) - kd * com_vel
+
+    for name in apply_joints:
+        # TODO: 不知道力的应用位置是质心还是根关节位置？
+        joint_index = joint_name.index(name)
+        torque[joint_index] += np.cross(com - joint_positions[joint_index], feedback_force)
+
+    # print(com_vel, torque[r_ankle], torque[l_ankle])
+
     return torque
 
