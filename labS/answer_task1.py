@@ -4,6 +4,52 @@ from multiprocessing.dummy import Pool
 import time
 
 
+class SkiningIterator:
+    """
+    基于迭代器生成最里面一层循环所需要的数据
+    """
+    def __init__(self, joint_translation: np.ndarray, joint_orientation: np.ndarray, T_pose_joint_translation: np.ndarray, T_pose_vertex_translation: np.ndarray, skinning_idx: np.ndarray, skinning_weight: np.ndarray):
+        self.joint_translation = joint_translation
+        self.joint_orientation = joint_orientation
+        self.T_pose_joint_translation = T_pose_joint_translation
+        self.T_pose_vertex_translation = T_pose_vertex_translation
+        self.skinning_idx = skinning_idx
+        self.skinning_weight = skinning_weight
+        self.cur = 0
+        self.len = T_pose_vertex_translation.shape[0] * 4
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.cur < self.len:
+            i = int(np.floor(self.cur / 4))
+            T_pose_pos: np.ndarray = self.T_pose_vertex_translation[i]
+            cur_skinning_idx = self.skinning_idx[i]
+            cur_skinning_weight = self.skinning_weight[i]
+            j = self.cur % 4
+            joint_index = cur_skinning_idx[j]
+            joint_weight = cur_skinning_weight[j]
+            joint_pos = self.T_pose_joint_translation[joint_index]
+            joint_orientation = self.joint_orientation[joint_index]
+            joint_translation = self.joint_translation[joint_index]
+            self.cur += 1
+            return T_pose_pos, joint_weight, joint_pos, joint_orientation, joint_translation
+
+        raise StopIteration
+
+
+
+def single_pos_skining(T_pose_pos: np.ndarray, joint_weight, joint_pos, joint_orientation, joint_translation):
+    # print(T_pose_pos, joint_weight, joint_pos, joint_orientation, joint_translation)
+    """
+    最内层循环的计算
+    """
+    r = R.from_quat(joint_orientation)
+    return joint_weight * (r.apply(T_pose_pos - joint_pos) + joint_translation)
+    # return joint_weight * ((T_pose_pos - joint_pos) + joint_translation)
+
+
 #---------------你的代码------------------#
 # translation 和 orientation 都是全局的
 def skinning(joint_translation: np.ndarray, joint_orientation: np.ndarray, T_pose_joint_translation: np.ndarray, T_pose_vertex_translation: np.ndarray, skinning_idx: np.ndarray, skinning_weight: np.ndarray):
@@ -38,8 +84,12 @@ def skinning(joint_translation: np.ndarray, joint_orientation: np.ndarray, T_pos
     #     # r = R.from_quat(r / np.linalg.norm(r))
     #     vertex_translation[i] = x
 
-    # with Pool(32) as p:
-    #     p.map(func, range(T_pose_vertex_translation.shape[0]))
+    # skinning_iter = SkiningIterator(joint_translation, joint_orientation, T_pose_joint_translation, T_pose_vertex_translation, skinning_idx, skinning_weight)
+
+    # with Pool() as p:
+    #     # NOTICE: starmap可以给函数传递多个参数，即元祖参数自动展开
+    #     # 但是多线程并没有改善性能
+    #     p.starmap(single_pos_skining, skinning_iter)
     for i in range(T_pose_vertex_translation.shape[0]):
         T_pose_pos: np.ndarray = T_pose_vertex_translation[i]
         x = np.zeros(T_pose_pos.shape)
