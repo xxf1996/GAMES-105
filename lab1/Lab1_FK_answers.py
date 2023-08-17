@@ -63,8 +63,21 @@ def part1_calculate_T_pose(bvh_file_path):
                 data = [float(x) for x in line.split()[1:]]
                 joint_offset.append(data)
 
+    # joint_map_name: list[str] = []
+
+    # # 基于自定义关节映射进行调整名字
+    # for i in range(len(joint_name)):
+    #     name = joint_name[i]
+
+    #     if name in customJointMap:
+    #         joint_map_name.append(customJointMap[name])
+    #     else:
+    #         joint_map_name.append(name)
+
+    # joint_name = joint_map_name
+
     print(joint_name)
-    print(joint_parent)
+    # print(joint_parent)
 
     return joint_name, joint_parent, np.array(joint_offset)
 

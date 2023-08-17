@@ -2,6 +2,38 @@ from viewer import SimpleViewer
 import numpy as np
 from Lab1_FK_answers import *
 
+# FIXME: 补充末端关节的映射&修复异常关节位置
+mocap_joint_map = {
+    "RootJoint": "Hips",
+    "lHip": "LeftUpLeg",
+    "lKnee": "LeftLeg",
+    "lAnkle": "LeftFoot",
+    "lToeJoint": "LeftToeBase",
+    "pelvis_lowerback": "Spine", # 骨盆下背部
+    "lTorso_Clavicle": "Spine1", # 锁骨
+    "lShoulder": "LeftShoulder",
+    "lElbow": "LeftForeArm", # 肘关节
+    "lWrist": "LeftHandThumb", # 腕关节
+    "rTorso_Clavicle": "Spine1",
+    "rShoulder": "RightShoulder",
+    "rElbow": "RightForeArm",
+    "rWrist": "RightHandThumb",
+    "torso_head": "Head",
+    "rHip": "RightUpLeg",
+    "rKnee": "RightLeg",
+    "rAnkle": "RightFoot",
+    "rToeJoint": "RightToeBase"
+}
+'''
+基于[SFU MOCAP](https://mocap.cs.sfu.ca/)的骨骼模型进行映射
+'''
+
+def exchange_dict(a):
+    '''
+    交换对象的KV值
+    '''
+    return dict((v,k) for k,v in a.items())
+
 
 def part1(viewer, bvh_file_path):
     """
@@ -31,6 +63,7 @@ def part2_animation(viewer, bvh_file_path):
     joint_name, joint_parent, joint_offset = part1_calculate_T_pose(bvh_file_path)
     motion_data = load_motion_data(bvh_file_path)
     frame_num = motion_data.shape[0]
+    print("frame_num:", frame_num)
     class UpdateHandle:
         def __init__(self):
             self.current_frame = 0
@@ -70,8 +103,8 @@ def part3_retarget(viewer, T_pose_bvh_path, A_pose_bvh_path):
 
 def main():
     # create a viewer
-    viewer = SimpleViewer()
-    bvh_file_path = "data/0017_SpeedVault001.bvh"
+    viewer = SimpleViewer(customJointMap=mocap_joint_map, worldScale=np.array([1.0, 1.0, 1.0]) / 30.0)
+    bvh_file_path = "data/0005_JumpRope001.bvh"
 
     # 请取消注释需要运行的代码
     # part1
@@ -79,10 +112,10 @@ def main():
 
     # part2
     # part2_one_pose(viewer, bvh_file_path)
-    # part2_animation(viewer, bvh_file_path)
+    part2_animation(viewer, bvh_file_path)
 
     # part3
-    part3_retarget(viewer, "data/walk60.bvh", "data/A_pose_run.bvh")
+    # part3_retarget(viewer, "data/walk60.bvh", "data/A_pose_run.bvh")
 
 
 if __name__ == "__main__":

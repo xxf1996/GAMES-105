@@ -6,6 +6,12 @@ import math
 from direct.showbase.DirectObject import DirectObject
 from direct.gui.DirectGui import *
 
+
+def get_joint_name(name_map, name):
+    if name in name_map:
+        return name_map[name]
+    return name
+
 class CameraCtrl(DirectObject):
     def __init__(self, base, camera):
         super(CameraCtrl).__init__()
@@ -167,13 +173,19 @@ class CameraCtrl(DirectObject):
         return task.cont
     
 class SimpleViewer(ShowBase):
-    def __init__(self, fStartDirect=True, windowType=None):
+    def __init__(self, fStartDirect=True, windowType=None, customJointMap = {}, worldScale=np.array([1.0, 1.0, 1.0])):
         '''
         this is only used for my project... lots of assumptions...
+        参数:
+            customJointMap: 自定义的关节映射，key为默认骨骼模型的关节名，value为新模型中对应的关节名称
+            worldScale: 不同的BVH模型，可能骨骼建模的比例不太一样，因此需要进行相应的缩放，即对FK计算后的关节位置（世界坐标）进行缩放
         '''
         super().__init__(fStartDirect, windowType)
-        self.disableMouse()        
-        
+        # 自定义关节名称映射
+        self.custom_joint_map = customJointMap
+        self.world_scale = worldScale
+        self.disableMouse()
+
         self.camera.lookAt(0,0.9,0)
         self.setupCameraLight()
         self.camera.setHpr(0,0,0)
@@ -200,7 +212,7 @@ class SimpleViewer(ShowBase):
         self.update_flag = True
         self.accept('space', self.receive_space)
         pass
-    
+
     def receive_space(self):
         self.update_flag = not self.update_flag
         
@@ -325,7 +337,7 @@ class SimpleViewer(ShowBase):
         if self.update_func and self.update_flag:
             self.update_func(self)
         return task.cont
-    
+
     def load_character(self):
         info = np.load('character_model.npy', allow_pickle=True).item()
         joint_pos = info['joint_pos']
@@ -364,7 +376,12 @@ class SimpleViewer(ShowBase):
         
         self.joints = joint
         self.joint_name = joint_name
-        self.name2idx = name_idx_map
+        # NOTICE: 基于自定义的关节映射得到自定义骨骼对应的默认关节索引，方便后续渲染位置的更新
+        self.name2idx = {
+            get_joint_name(self.custom_joint_map, joint_name[i]): name_idx_map[joint_name[i]] for i in range(len(joint_name))
+        }
+        # self.name2idx = name_idx_map
+        print(self.name2idx)
         self.parent_index = info['parent']
         self.init_joint_pos = self.get_joint_positions()
 
@@ -402,7 +419,7 @@ class SimpleViewer(ShowBase):
         assert joint_orientations.shape == (length, 4)
         
         for i in range(length):
-            self.set_joint_position_orientation(joint_name_list[i], joint_positions[i], joint_orientations[i])
+            self.set_joint_position_orientation(joint_name_list[i], joint_positions[i] * self.world_scale, joint_orientations[i])
     def show_rest_pose(self, joint_name, joint_parent, joint_offset):
         length = len(joint_name)
         joint_positions = np.zeros((length, 3), dtype=np.float64)
@@ -413,13 +430,13 @@ class SimpleViewer(ShowBase):
             else:
                 joint_positions[i] = joint_positions[joint_parent[i]] + joint_offset[i]
             joint_orientations[i, 3] = 1.0
-            self.set_joint_position_orientation(joint_name[i], joint_positions[i], joint_orientations[i])
+            self.set_joint_position_orientation(joint_name[i], joint_positions[i] * self.world_scale, joint_orientations[i])
 
     def get_meta_data(self):
         return self.joint_name, self.parent_index, self.init_joint_pos
     
     def move_marker(self, marker, x, y):
-        
+
         if not self.update_marker_func:
             return
         
