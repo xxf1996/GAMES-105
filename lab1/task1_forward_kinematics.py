@@ -2,27 +2,32 @@ from viewer import SimpleViewer
 import numpy as np
 from Lab1_FK_answers import *
 
-# FIXME: 补充末端关节的映射&修复异常关节位置
 mocap_joint_map = {
     "RootJoint": "Hips",
     "lHip": "LeftUpLeg",
     "lKnee": "LeftLeg",
     "lAnkle": "LeftFoot",
     "lToeJoint": "LeftToeBase",
+    "lToeJoint_end": "LeftToeBase_end",
+    "lowerback_torso": "Spine1", # 躯干
     "pelvis_lowerback": "Spine", # 骨盆下背部
-    "lTorso_Clavicle": "Spine1", # 锁骨
-    "lShoulder": "LeftShoulder",
+    "lTorso_Clavicle": "LeftShoulder", # 锁骨
+    "lShoulder": "LeftArm",
     "lElbow": "LeftForeArm", # 肘关节
     "lWrist": "LeftHandThumb", # 腕关节
-    "rTorso_Clavicle": "Spine1",
-    "rShoulder": "RightShoulder",
+    "lWrist_end": "L_Wrist_End",
+    "rTorso_Clavicle": "RightShoulder",
+    "rShoulder": "RightArm",
     "rElbow": "RightForeArm",
     "rWrist": "RightHandThumb",
+    "rWrist_end": "R_Wrist_End",
+    "torso_head_end": "Head_end",
     "torso_head": "Head",
     "rHip": "RightUpLeg",
     "rKnee": "RightLeg",
     "rAnkle": "RightFoot",
-    "rToeJoint": "RightToeBase"
+    "rToeJoint": "RightToeBase",
+    "rToeJoint_end": "RightToeBase_end"
 }
 '''
 基于[SFU MOCAP](https://mocap.cs.sfu.ca/)的骨骼模型进行映射
@@ -103,8 +108,9 @@ def part3_retarget(viewer, T_pose_bvh_path, A_pose_bvh_path):
 
 def main():
     # create a viewer
-    viewer = SimpleViewer(customJointMap=mocap_joint_map, worldScale=np.array([1.0, 1.0, 1.0]) / 30.0)
-    bvh_file_path = "data/0005_JumpRope001.bvh"
+    viewer = SimpleViewer(customJointMap=mocap_joint_map, worldScale=np.array([1.0, 1.0, 1.0]) / 35.0)
+    # viewer = SimpleViewer()
+    bvh_file_path = "data/0008_ChaCha001.bvh"
 
     # 请取消注释需要运行的代码
     # part1
