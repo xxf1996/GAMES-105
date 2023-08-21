@@ -93,7 +93,7 @@ def bonus(viewer, left_target_pos, right_target_pos):
     right_marker = viewer.create_marker2(right_target_pos, [0, 0, 1, 1])
     
     joint_name, joint_parent, joint_initial_position = viewer.get_meta_data()
-    
+
     # 为了兼容如此设置，实际上末端节点应当为左右手
     meta_data = MetaData(joint_name, joint_parent, joint_initial_position, 'lToeJoint_end', 'lWrist_end')
     joint_position = viewer.get_joint_positions()
@@ -114,7 +114,7 @@ def bonus(viewer, left_target_pos, right_target_pos):
     handle = UpdateHandle(left_marker, right_marker, joint_position, joint_orientation)
     handle.update_func(viewer)
     
-    
+
     viewer.update_marker_func = handle.update_func
     viewer.run()
 
@@ -124,13 +124,13 @@ def main():
     
     # part1
     # part1_simple(viewer, np.array([0.17, 1.45, 0.57]))
-    # part1_hard(viewer, np.array([0.5, 0.5, 0.5]))
+    # part1_hard(viewer, np.array([0.5, 1.2, 0.5]))
     # part1_animation(viewer, np.array([0.5, 0.5, 0.5]))
 
     # part2
-    part2(viewer, 'data/walk60.bvh')
+    # part2(viewer, 'data/walk60.bvh')
 
-    # bonus(viewer, np.array([0.5, 0.5, 0.5]), np.array([0, 0.5, 0.5]))
+    bonus(viewer, np.array([0.5, 1.1, 0.5]), np.array([-0.3, 1.2, 0.5]))
 
 if __name__ == "__main__":
     main()

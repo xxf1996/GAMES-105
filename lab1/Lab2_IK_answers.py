@@ -10,7 +10,7 @@ MAX_ITER_NUM = 100
 def normalize(v: np.ndarray):
     return v / np.linalg.norm(v)
 
-def part1_inverse_kinematics(meta_data: MetaData, joint_positions: np.ndarray, joint_orientations: np.ndarray, target_pose: np.ndarray):
+def part1_inverse_kinematics(meta_data: MetaData, joint_positions: np.ndarray, joint_orientations: np.ndarray, target_pose: np.ndarray, skip_fk = False):
     """
     完成函数，计算逆运动学
     输入: 
@@ -18,6 +18,7 @@ def part1_inverse_kinematics(meta_data: MetaData, joint_positions: np.ndarray, j
         joint_positions: 当前的关节位置，是一个numpy数组，shape为(M, 3)，M为关节数
         joint_orientations: 当前的关节朝向，是一个numpy数组，shape为(M, 4)，M为关节数
         target_pose: 目标位置，是一个numpy数组，shape为(3,)
+        skip_fk: 是否跳过不属于IK关键链的其他关节的FK计算，跳过FK计算即相当于固定其它的关节位置和朝向
     输出:
         经过IK后的姿态
         joint_positions: 计算得到的关节位置，是一个numpy数组，shape为(M, 3)，M为关节数
@@ -98,16 +99,17 @@ def part1_inverse_kinematics(meta_data: MetaData, joint_positions: np.ndarray, j
                 prev_orientation = cur_orientation
                 prev_pos = cur_pos
 
-    # NOTICE: 对其他的关节位置进行一遍FK计算，确保其他关节位置同时发生改变
-    for i in range(0, len(meta_data.joint_name)):
-        if i in path:
-            continue
-        parent_index = meta_data.joint_parent[i]
-        parent_orientation = R.from_quat(joint_orientations[parent_index])
-        parent_pos: np.ndarray = joint_positions[parent_index]
-        cur_offset: np.ndarray = joint_offset[i]
-        cur_pos = parent_pos + parent_orientation.apply(cur_offset)
-        joint_positions[i] = cur_pos
+    if not skip_fk:
+        # NOTICE: 对其他的关节位置进行一遍FK计算，确保其他关节位置同时发生改变
+        for i in range(0, len(meta_data.joint_name)):
+            if i in path:
+                continue
+            parent_index = meta_data.joint_parent[i]
+            parent_orientation = R.from_quat(joint_orientations[parent_index])
+            parent_pos: np.ndarray = joint_positions[parent_index]
+            cur_offset: np.ndarray = joint_offset[i]
+            cur_pos = parent_pos + parent_orientation.apply(cur_offset)
+            joint_positions[i] = cur_pos
 
 
     end_pos: np.ndarray = joint_positions[end_joint_index]
@@ -192,9 +194,15 @@ def part2_inverse_kinematics(meta_data: MetaData, joint_positions: np.ndarray, j
 
     return joint_positions, joint_orientations
 
-def bonus_inverse_kinematics(meta_data, joint_positions, joint_orientations, left_target_pose, right_target_pose):
+def bonus_inverse_kinematics(meta_data: MetaData, joint_positions: np.ndarray, joint_orientations, left_target_pose: np.ndarray, right_target_pose: np.ndarray,):
     """
     输入左手和右手的目标位置，固定左脚，完成函数，计算逆运动学
     """
+    joint_positions, joint_orientations = part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, left_target_pose)
+    # NOTICE：从两个关节链重叠部分的父节点开始，构建一个新的关节链，可以避免对已经计算的部分的干扰
+    meta_data.root_joint = "lowerback_torso"
+    meta_data.end_joint = "rWrist_end"
+    joint_positions, joint_orientations = part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, right_target_pose, skip_fk=True)
+
 
     return joint_positions, joint_orientations
