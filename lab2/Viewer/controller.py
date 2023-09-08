@@ -169,7 +169,7 @@ class InterpolationHelper():
         return pos, vel, off_pos, off_vel
     
 class Controller:
-    def __init__(self, viewer) -> None:
+    def __init__(self, viewer: SimpleViewer) -> None:
         
         self.vel = np.zeros(3)
         self.acc = np.zeros(3)

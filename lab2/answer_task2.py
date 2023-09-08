@@ -33,11 +33,14 @@ class CharacterController():
         self.motions.append(BVHMotion('motion_material/idle.bvh'))
         self.motions.append(BVHMotion('motion_material/walk_forward.bvh'))
         self.motions.append(BVHMotion('motion_material/run_forward.bvh'))
+        self.long_motion = BVHMotion('motion_material/kinematic_motion/long_walk.bvh')
         self.controller = controller
         self.cur_root_pos = self.motions[0].joint_position[0, 0]
         self.cur_root_rot = self.motions[0].joint_rotation[0, 0]
         self.cur_frame = 0
         self.prev_motion_type = 0
+        self.simulation_arrow = None
+        self.simulation_point = None
         pass
 
     def get_motion_type(self, v: float):
@@ -100,9 +103,14 @@ class CharacterController():
             new_motion = self.motions[cur_motion_type].raw_copy()
             new_motion.joint_position[self.cur_frame, 0, [0, 2]] = next_pos_xz
             new_motion.joint_rotation[self.cur_frame, 0] = next_face_direction
-            joint_translation_fk, joint_orientation_fk = new_motion.batch_forward_kinematics()
+            joint_translation_fk, joint_orientation_fk, simulation_translation, simulation_orientation = new_motion.batch_forward_kinematics()
             joint_translation = joint_translation_fk[self.cur_frame]
             joint_orientation = joint_orientation_fk[self.cur_frame]
+            self.update_simulation_draw(
+                simulation_translation[self.cur_frame],
+                simulation_orientation[self.cur_frame],
+                new_motion
+            )
 
             return joint_translation, joint_orientation
 
@@ -117,12 +125,34 @@ class CharacterController():
         cur_motion.joint_position[self.cur_frame] = (1.0 - motion_basis) * cur_motion.joint_position[self.cur_frame] + motion_basis * next_motion.joint_position[0]
         for i in range(cur_motion.joint_rotation.shape[1]):
             cur_motion.joint_rotation[self.cur_frame, i] = quat_linear_interpolation(cur_motion.joint_rotation[self.cur_frame, i], next_motion.joint_rotation[0, i], motion_basis)
-        joint_translation_fk, joint_orientation_fk = cur_motion.batch_forward_kinematics()
+        joint_translation_fk, joint_orientation_fk, simulation_translation, simulation_orientation = cur_motion.batch_forward_kinematics()
         joint_translation = joint_translation_fk[self.cur_frame]
         joint_orientation = joint_orientation_fk[self.cur_frame]
-
+        self.update_simulation_draw(
+            simulation_translation[self.cur_frame],
+            simulation_orientation[self.cur_frame],
+            cur_motion
+        )
 
         return joint_translation, joint_orientation
+
+    def update_simulation_draw(self, translation: np.ndarray, orientation: np.ndarray, motion: BVHMotion):
+        # NOTICE: 这一步就是想旋转方向投影到xz平面上，类似于求face direction
+        face_direction = R.from_quat(orientation).apply(np.array([0, 0, 1]))
+        face_xz = face_direction[[0, 2]]
+        # print("face xz:", face_xz, orientation)
+        if self.simulation_arrow == None:
+            self.simulation_arrow = self.controller.viewer.create_arrow(
+                translation,
+                face_xz,
+                width=0.05,
+                length=0.5
+            )
+        else:
+            self.simulation_arrow.setPos(*translation)
+            self.simulation_arrow.setQuat(self.controller.viewer.get_quat_from_forward_xz(
+                face_xz
+            ))
 
     def update_state_test(self,
                      desired_pos_list: np.ndarray,
@@ -189,6 +219,16 @@ class CharacterController():
 
         return joint_name, joint_translation, joint_orientation
 
+    def motion_matching(
+            self,
+            desired_pos_list: np.ndarray,
+            desired_rot_list: np.ndarray,
+            desired_vel_list: np.ndarray,
+            desired_avel_list: np.ndarray,
+            current_gait
+    ):
+        # TODO: motion matching匹配最近邻动作的细节处理，比如long motion需不需要做朝向对齐；
+        self.long_motion
 
 
     def update_state(self,

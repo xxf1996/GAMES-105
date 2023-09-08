@@ -497,18 +497,21 @@ class SimpleViewer(ShowBase):
         self.accept('arrow_left-repeat', self.move_marker, [marker, -0.05, 0])
         self.accept('arrow_right-repeat', self.move_marker, [marker, 0.05, 0])
         return marker
-    
-    def create_arrow(self, pos, forward_xz = np.array([0,1]), color = [1,0,0,0]):
-        from .visualize_utils import draw_arrow
-        arrow = self.render.attachNewNode("arrow")
-        draw_arrow(arrow, 0.3, 1, color)
-        arrow.setPos(*pos)
-        
+
+    def get_quat_from_forward_xz(self, forward_xz = np.array([0,1])):
         from scipy.spatial.transform import Rotation as R
         axis = np.array([0,1,0])
         angle = np.arctan2(forward_xz[0], forward_xz[1])
         rot = R.from_rotvec(angle * axis).as_quat()
         quat = pc.Quat(rot[3], rot[0], rot[1], rot[2])
-        arrow.setQuat(quat)
+
+        return quat
+
+    def create_arrow(self, pos, forward_xz = np.array([0,1]), color = [1,0,0,0], width = 0.3, length = 1.0):
+        from .visualize_utils import draw_arrow
+        arrow = self.render.attachNewNode("arrow")
+        draw_arrow(arrow, width, length, color)
+        arrow.setPos(*pos)
+        arrow.setQuat(self.get_quat_from_forward_xz(forward_xz))
         return arrow
     
