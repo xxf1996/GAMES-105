@@ -2,6 +2,9 @@
 from __future__ import annotations
 from answer_task1 import *
 from Viewer.controller import Controller
+from scipy.spatial import KDTree
+from typing import Optional
+
 
 WALK_MAX_V: float = 2.5
 WALK_MIN_V: float = 0.01
@@ -30,17 +33,18 @@ def quat_linear_interpolation(q0: np.ndarray, q1: np.ndarray, a: float):
 class CharacterController():
     def __init__(self, controller: Controller) -> None:
         self.motions: list[BVHMotion] = []
-        self.motions.append(BVHMotion('motion_material/idle.bvh'))
-        self.motions.append(BVHMotion('motion_material/walk_forward.bvh'))
-        self.motions.append(BVHMotion('motion_material/run_forward.bvh'))
         self.long_motion = BVHMotion('motion_material/kinematic_motion/long_walk.bvh')
+        self.long_motion_vel = np.zeros(shape=(self.long_motion.motion_length, 3))
+        self.long_motion_vectors = np.zeros(shape=(self.long_motion.motion_length, 7))
+        self.long_motion_translation, self.long_motion_orientation, self.long_motion_simulation_translation, self.long_motion_simulation_orientation = self.long_motion.batch_forward_kinematics()
         self.controller = controller
-        self.cur_root_pos = self.motions[0].joint_position[0, 0]
-        self.cur_root_rot = self.motions[0].joint_rotation[0, 0]
         self.cur_frame = 0
         self.prev_motion_type = 0
         self.simulation_arrow = None
         self.simulation_point = None
+        self.long_motion_tree: Optional[KDTree] = None
+
+        self.compute_motion_vel()
         pass
 
     def get_motion_type(self, v: float):
@@ -68,6 +72,16 @@ class CharacterController():
 
         # 提速时
         return 1.0 - (max_v - cur_v) / (max_v - min_v)
+
+    def load_motions(self):
+        '''
+        用于加载motion graph所需要的bvh motion
+        '''
+        self.motions.append(BVHMotion('motion_material/idle.bvh'))
+        self.motions.append(BVHMotion('motion_material/walk_forward.bvh'))
+        self.motions.append(BVHMotion('motion_material/run_forward.bvh'))
+        self.cur_root_pos = self.motions[0].joint_position[0, 0]
+        self.cur_root_rot = self.motions[0].joint_rotation[0, 0]
 
     def motion_graph(self,
                      desired_pos_list: np.ndarray,
@@ -136,6 +150,15 @@ class CharacterController():
 
         return joint_translation, joint_orientation
 
+    def compute_motion_vel(self):
+        for i in range(self.long_motion.motion_length):
+            cur_pos = self.long_motion_simulation_translation[i]
+            prev_pos = self.long_motion_simulation_translation[i - 1]
+            self.long_motion_vel[i] = (cur_pos - prev_pos) / self.long_motion.frame_time
+            # NOTICE: 提前计算好需要匹配的向量，减少耗时
+            self.long_motion_vectors[i] = np.concatenate((self.long_motion_simulation_orientation[i], self.long_motion_vel[i]))
+        self.long_motion_tree = KDTree(self.long_motion_vectors)
+
     def update_simulation_draw(self, translation: np.ndarray, orientation: np.ndarray, motion: BVHMotion):
         # NOTICE: 这一步就是想旋转方向投影到xz平面上，类似于求face direction
         face_direction = R.from_quat(orientation).apply(np.array([0, 0, 1]))
@@ -169,7 +192,7 @@ class CharacterController():
             desired_rot_list: 期望旋转, 6x4的矩阵, 每一行对应0，20，40...帧的期望旋转(水平), 期望旋转可以用来拟合根节点旋转也可以是其他
             desired_vel_list: 期望速度, 6x3的矩阵, 每一行对应0，20，40...帧的期望速度(水平), 期望速度可以用来拟合根节点速度也可以是其他
             desired_avel_list: 期望角速度, 6x3的矩阵, 每一行对应0，20，40...帧的期望角速度(水平), 期望角速度可以用来拟合根节点角速度也可以是其他
-        
+
         Output: 同作业一,输出下一帧的关节名字,关节位置,关节旋转
             joint_name: List[str], 代表了所有关节的名字
             joint_translation: np.ndarray，形状为(M, 3)的numpy数组，包含着所有关节的全局位置
@@ -229,6 +252,46 @@ class CharacterController():
     ):
         # TODO: motion matching匹配最近邻动作的细节处理，比如long motion需不需要做朝向对齐；
         self.long_motion
+        next_frame = self.cur_frame
+        min_dist = 1e10
+        cur_simulation_v = np.concatenate((desired_rot_list[0], desired_vel_list[0]))
+        next_20_simulation_v = np.concatenate((desired_rot_list[1], desired_vel_list[1]))
+        next_40_simulation_v = np.concatenate((desired_rot_list[2], desired_vel_list[2]))
+        # TODO: 需要用kd tree进行一下遍历的加速
+        min_dist, next_frame = self.long_motion_tree.query(cur_simulation_v)
+        # for i in range(self.long_motion.motion_length):
+        #     if i == self.cur_frame:
+        #         continue
+        #     # TODO: 对simulation bone和期望位置和速度进行匹配（或许还要加上角速度？），基于欧氏距离
+        #     next_20 = (i + 20) % self.long_motion.motion_length
+        #     next_40 = (i + 40) % self.long_motion.motion_length
+        #     cur_object_v = self.long_motion_vectors[i]
+        #     next_20_object_v = self.long_motion_vectors[next_20]
+        #     next_40_object_v = self.long_motion_vectors[next_40]
+        #     cur_dist = np.linalg.norm(cur_simulation_v - cur_object_v) + np.linalg.norm(next_20_simulation_v - next_20_object_v) + np.linalg.norm(next_40_simulation_v - next_40_object_v)
+        #     if cur_dist < min_dist:
+        #         min_dist = cur_dist
+        #         next_frame = i
+
+        if np.abs(next_frame - self.cur_frame) < 5:
+            self.cur_frame = (self.cur_frame + 1) % self.long_motion.motion_length
+        else:
+            self.cur_frame = next_frame
+
+        joint_translation: np.ndarray = self.long_motion_translation[self.cur_frame].copy()
+        joint_orientation: np.ndarray = self.long_motion_orientation[self.cur_frame]
+        simulation_translation: np.ndarray = self.long_motion_simulation_translation[self.cur_frame]
+        offset_translation = desired_pos_list[0] - simulation_translation
+
+        for i in range(joint_translation.shape[0]):
+            joint_translation[i] += offset_translation
+
+        self.cur_root_pos = desired_pos_list[0]
+        self.cur_root_rot = joint_orientation[0]
+
+        return self.long_motion.joint_name, joint_translation, joint_orientation
+
+
 
 
     def update_state(self,
@@ -283,6 +346,6 @@ class CharacterController():
         # 一个简单的例子，将手柄的位置与角色对齐
         controller.set_pos(self.cur_root_pos)
         controller.set_rot(self.cur_root_rot)
-        
+
         return character_state
     # 你的其他代码,state matchine, motion matching, learning, etc.

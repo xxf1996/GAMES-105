@@ -1,8 +1,9 @@
 from Viewer.controller import SimpleViewer, Controller
 from answer_task2 import *
+import time
 
 class InteractiveUpdate():
-    def __init__(self, viewer, controller, character_controller):
+    def __init__(self, viewer, controller, character_controller: CharacterController):
         self.viewer = viewer
         self.controller = controller
         self.character_controller = character_controller
@@ -10,10 +11,13 @@ class InteractiveUpdate():
     def update(self, task):
         desired_pos_list, desired_rot_list, desired_vel_list, desired_avel_list, current_gait = \
             self.controller.get_desired_state()
-        character_state = self.character_controller.update_state(
-                desired_pos_list, desired_rot_list, 
+        start_time = time.time()
+        character_state = self.character_controller.motion_matching(
+                desired_pos_list, desired_rot_list,
                 desired_vel_list, desired_avel_list, current_gait
                 )
+        end_time = time.time()
+        print("motion matching耗时: {:.2f}s".format(end_time - start_time))
         character_state = self.character_controller.sync_controller_and_character(
                 self.controller, character_state
                 )

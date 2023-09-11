@@ -86,6 +86,7 @@ class BVHMotion():
         self.joint_parent = []
         self.hip_index = 0
         self.spine_index = 0
+        self.frame_time = 0.016667 # 每帧动作的时间
         
         # 一些local数据, 对应bvh里的channel, XYZposition和 XYZrotation
         #! 这里我们把没有XYZ position的joint的position设置为offset, 从而进行统一
