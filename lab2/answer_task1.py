@@ -127,7 +127,7 @@ class BVHMotion():
             cur_channel += self.joint_channel[i]
 
         # NOTICE: 这里的骨骼有左右两个髋关节，感觉用其父关节进行代替比较好？
-        self.hip_index = self.joint_name.index("lHip")
+        self.hip_index = 0
         self.spine_index = self.joint_name.index("lowerback_torso") # 上脊柱关节
 
         return
@@ -173,9 +173,9 @@ class BVHMotion():
         基于[代码与数据驱动的位移](https://theorangeduck.com/page/code-vs-data-driven-displacement)构造的某一帧下当前骨架对应的仿真骨骼信息
         '''
         projected_translation = np.array([joint_translation[self.spine_index, 0], 0.01, joint_translation[self.spine_index, 2]])
-        # Ry, _ = self.decompose_rotation_with_yaxis(joint_orientation)
+        Ry, _ = self.decompose_rotation_with_yaxis(joint_orientation[self.hip_index])
 
-        return projected_translation, joint_orientation[self.hip_index]
+        return projected_translation, Ry
 
 
     def adjust_joint_name(self, target_joint_name):
@@ -236,7 +236,8 @@ class BVHMotion():
 
         r = R.from_quat(rotation)
         angle = r.as_euler("yzx")
-        ry = R.from_rotvec(np.array([0, 1, 0]) * angle[1])
+        # FIXME: 这里分解成yzx顺序时，理论上第一个分量就是绕y轴旋转的角度？
+        ry = R.from_rotvec(np.array([0, 1, 0]) * angle[0])
         Ry = ry.as_quat()
         rxz = ry.inv() * r
         Rxz = rxz.as_quat()

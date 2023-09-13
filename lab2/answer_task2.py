@@ -10,6 +10,10 @@ WALK_MAX_V: float = 2.5
 WALK_MIN_V: float = 0.01
 MOTION_V = [0, WALK_MIN_V, WALK_MAX_V, 5.0]
 '''各个动作的速度区间，依次增大'''
+RESPONSIVENESS = 2
+'''
+响应权重，权重越大响应速度越快，即对于未来轨迹的匹配程度越精准
+'''
 
 def get_face_xz_from_rotation(quat: np.ndarray, motion: BVHMotion):
     (Ry, _) = motion.decompose_rotation_with_yaxis(quat)
@@ -35,7 +39,9 @@ class CharacterController():
         self.motions: list[BVHMotion] = []
         self.long_motion = BVHMotion('motion_material/kinematic_motion/long_walk.bvh')
         self.long_motion_vel = np.zeros(shape=(self.long_motion.motion_length, 3))
-        self.long_motion_vectors = np.zeros(shape=(self.long_motion.motion_length, 7))
+        self.long_motion_angular_vel = np.zeros_like(self.long_motion_vel)
+        # 顺序为：朝向，速度，角速度
+        self.long_motion_vectors = np.zeros(shape=(self.long_motion.motion_length, 10 * 3))
         self.long_motion_translation, self.long_motion_orientation, self.long_motion_simulation_translation, self.long_motion_simulation_orientation = self.long_motion.batch_forward_kinematics()
         self.controller = controller
         self.cur_frame = 0
@@ -154,9 +160,26 @@ class CharacterController():
         for i in range(self.long_motion.motion_length):
             cur_pos = self.long_motion_simulation_translation[i]
             prev_pos = self.long_motion_simulation_translation[i - 1]
+            cur_orientation = R.from_quat(self.long_motion_simulation_orientation[i]).as_euler("XYZ")
+            prev_orientation = R.from_quat(self.long_motion_simulation_orientation[i - 1]).as_euler("XYZ")
             self.long_motion_vel[i] = (cur_pos - prev_pos) / self.long_motion.frame_time
+            self.long_motion_angular_vel[i] = (cur_orientation - prev_orientation) / self.long_motion.frame_time
+
+        for i in range(self.long_motion.motion_length):
+            next_20 = (i + 20) % self.long_motion.motion_length
+            next_40 = (i + 40) % self.long_motion.motion_length
             # NOTICE: 提前计算好需要匹配的向量，减少耗时
-            self.long_motion_vectors[i] = np.concatenate((self.long_motion_simulation_orientation[i], self.long_motion_vel[i]))
+            self.long_motion_vectors[i] = np.concatenate((
+                self.long_motion_simulation_orientation[i],
+                self.long_motion_vel[i],
+                self.long_motion_angular_vel[i],
+                self.long_motion_simulation_orientation[next_20] * RESPONSIVENESS,
+                self.long_motion_vel[next_20] * RESPONSIVENESS,
+                self.long_motion_angular_vel[next_20] * RESPONSIVENESS,
+                self.long_motion_simulation_orientation[next_40] * RESPONSIVENESS,
+                self.long_motion_vel[next_40] * RESPONSIVENESS,
+                self.long_motion_angular_vel[next_40] * RESPONSIVENESS
+            ))
         self.long_motion_tree = KDTree(self.long_motion_vectors)
 
     def update_simulation_draw(self, translation: np.ndarray, orientation: np.ndarray, motion: BVHMotion):
@@ -254,11 +277,16 @@ class CharacterController():
         self.long_motion
         next_frame = self.cur_frame
         min_dist = 1e10
-        cur_simulation_v = np.concatenate((desired_rot_list[0], desired_vel_list[0]))
-        next_20_simulation_v = np.concatenate((desired_rot_list[1], desired_vel_list[1]))
-        next_40_simulation_v = np.concatenate((desired_rot_list[2], desired_vel_list[2]))
+        cur_simulation_v = np.concatenate((desired_rot_list[0], desired_vel_list[0], desired_avel_list[0]))
+        next_20_simulation_v = np.concatenate((desired_rot_list[1], desired_vel_list[1], desired_avel_list[1]))
+        next_40_simulation_v = np.concatenate((desired_rot_list[2], desired_vel_list[2], desired_avel_list[2]))
+        simulation_v = np.concatenate((
+            cur_simulation_v,
+            next_20_simulation_v * RESPONSIVENESS,
+            next_40_simulation_v * RESPONSIVENESS
+        ))
         # TODO: 需要用kd tree进行一下遍历的加速
-        min_dist, next_frame = self.long_motion_tree.query(cur_simulation_v)
+        min_dist, next_frame = self.long_motion_tree.query(simulation_v)
         # for i in range(self.long_motion.motion_length):
         #     if i == self.cur_frame:
         #         continue
@@ -273,9 +301,12 @@ class CharacterController():
         #         min_dist = cur_dist
         #         next_frame = i
 
-        if np.abs(next_frame - self.cur_frame) < 5:
+        # FIXME: 这里适当放大近似动作的间隔可以改善动作loop的程度，但是总会出现跳动的情况？
+        if np.abs(next_frame - self.cur_frame) < 30:
             self.cur_frame = (self.cur_frame + 1) % self.long_motion.motion_length
         else:
+            # FIXME: 应该在动作发生明显变化的时候对动作进行插值？
+            print("动作变化：", next_frame)
             self.cur_frame = next_frame
 
         joint_translation: np.ndarray = self.long_motion_translation[self.cur_frame].copy()
@@ -286,8 +317,14 @@ class CharacterController():
         for i in range(joint_translation.shape[0]):
             joint_translation[i] += offset_translation
 
-        self.cur_root_pos = desired_pos_list[0]
+        self.cur_root_pos = joint_translation[0]
         self.cur_root_rot = joint_orientation[0]
+
+        self.update_simulation_draw(
+            self.long_motion_simulation_translation[self.cur_frame] + offset_translation,
+            self.long_motion_simulation_orientation[self.cur_frame],
+            self.long_motion
+        )
 
         return self.long_motion.joint_name, joint_translation, joint_orientation
 
@@ -344,8 +381,8 @@ class CharacterController():
         '''
         
         # 一个简单的例子，将手柄的位置与角色对齐
-        controller.set_pos(self.cur_root_pos)
-        controller.set_rot(self.cur_root_rot)
+        # controller.set_pos(self.cur_root_pos)
+        # controller.set_rot(self.cur_root_rot)
 
         return character_state
     # 你的其他代码,state matchine, motion matching, learning, etc.
