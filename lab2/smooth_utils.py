@@ -5,6 +5,8 @@ from scipy.spatial.transform import Rotation as R
 def align_quat(qt: np.ndarray, inplace: bool):
     ''' make q_n and q_n+1 in the same semisphere
         the first axis of qt should be the time
+
+        实际上就是把四元数对（相邻两个四元数即为一对）放到同一个半圆内，即最小的角度变化方向
     '''
     qt = np.asarray(qt)
     if qt.shape[-1] != 4:
@@ -19,6 +21,7 @@ def align_quat(qt: np.ndarray, inplace: bool):
     sign = np.sum(qt[:-1] * qt[1:], axis=-1)
     sign[sign < 0] = -1
     sign[sign >= 0] = 1
+    # NOTICE: 这里cumprod就是f(i) = f(i) * f(i - 1)；用意就是如果前面一个为-1，代表前面的四元数已经经过负向变换变到最小差距角度内了，如果此时f(i)为-1，那么新的f(i)就是1了，即不需要改变方向了，因为前面一个四元数已经进行方向变化了！（一对四元数，只需要变换其中一个四元数为负向即可！妙啊！！！！）
     sign = np.cumprod(sign, axis=0, )
 
     qt[1:][sign < 0] *= -1
@@ -27,6 +30,8 @@ def align_quat(qt: np.ndarray, inplace: bool):
 def quat_to_avel(rot, dt):
     '''
     用有限差分计算角速度, 假设第一维度是时间
+
+    q导 = 0.5 * 角速度 * q
     '''
     rot = align_quat(rot, inplace=False)
     quat_diff = (rot[1:] - rot[:-1])/dt

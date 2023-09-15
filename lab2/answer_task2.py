@@ -4,15 +4,29 @@ from answer_task1 import *
 from Viewer.controller import Controller
 from scipy.spatial import KDTree
 from typing import Optional
+from smooth_utils import quat_to_avel
 
 
 WALK_MAX_V: float = 2.5
 WALK_MIN_V: float = 0.01
 MOTION_V = [0, WALK_MIN_V, WALK_MAX_V, 5.0]
 '''各个动作的速度区间，依次增大'''
-RESPONSIVENESS = 2
+RESPONSIVENESS = 1.8
 '''
 响应权重，权重越大响应速度越快，即对于未来轨迹的匹配程度越精准
+'''
+TRANSITION_FRAME_NUM = 5
+ANGULAR_BASIS = 1
+'''
+角速度权重
+'''
+ORIENTATION_BASIS = 1
+'''
+朝向权重
+'''
+TRANSLATION_BASIS = 1
+'''
+位移权重
 '''
 
 def get_face_xz_from_rotation(quat: np.ndarray, motion: BVHMotion):
@@ -21,6 +35,17 @@ def get_face_xz_from_rotation(quat: np.ndarray, motion: BVHMotion):
     face_direction = Ry.apply(np.array([0, 0, 1]))
 
     return face_direction[[0, 2]]
+
+def get_xz_angle(quat: np.ndarray, degress = True):
+    r = R.from_quat(quat)
+    face_direction = r.apply(np.array([0, 0, 1]))
+    [x, _, z] = face_direction
+    angle = np.arctan2(x, z)
+
+    if degress:
+        angle *= (180 / np.pi)
+
+    return angle
 
 def quat_linear_interpolation(q0: np.ndarray, q1: np.ndarray, a: float):
     angle = np.arccos(np.dot(q0, q1))
@@ -41,7 +66,7 @@ class CharacterController():
         self.long_motion_vel = np.zeros(shape=(self.long_motion.motion_length, 3))
         self.long_motion_angular_vel = np.zeros_like(self.long_motion_vel)
         # 顺序为：朝向，速度，角速度
-        self.long_motion_vectors = np.zeros(shape=(self.long_motion.motion_length, 10 * 3))
+        self.long_motion_vectors = np.zeros(shape=(self.long_motion.motion_length, 7 * 6 + 3 * 5))
         self.long_motion_translation, self.long_motion_orientation, self.long_motion_simulation_translation, self.long_motion_simulation_orientation = self.long_motion.batch_forward_kinematics()
         self.controller = controller
         self.cur_frame = 0
@@ -49,6 +74,10 @@ class CharacterController():
         self.simulation_arrow = None
         self.simulation_point = None
         self.long_motion_tree: Optional[KDTree] = None
+        self.motion_transition = False
+        self.motion_transition_start = 0
+        self.motion_transition_end = 0
+        self.motion_transition_frame = 0
 
         self.compute_motion_vel()
         pass
@@ -160,25 +189,55 @@ class CharacterController():
         for i in range(self.long_motion.motion_length):
             cur_pos = self.long_motion_simulation_translation[i]
             prev_pos = self.long_motion_simulation_translation[i - 1]
-            cur_orientation = R.from_quat(self.long_motion_simulation_orientation[i]).as_euler("XYZ")
-            prev_orientation = R.from_quat(self.long_motion_simulation_orientation[i - 1]).as_euler("XYZ")
+            # cur_orientation = R.from_quat(self.long_motion_simulation_orientation[i]).as_euler("XYZ")
+            # prev_orientation = R.from_quat(self.long_motion_simulation_orientation[i - 1]).as_euler("XYZ")
             self.long_motion_vel[i] = (cur_pos - prev_pos) / self.long_motion.frame_time
-            self.long_motion_angular_vel[i] = (cur_orientation - prev_orientation) / self.long_motion.frame_time
+            # self.long_motion_angular_vel[i] = (cur_orientation - prev_orientation) / self.long_motion.frame_time * ANGULAR_BASIS
+
+        self.long_motion_angular_vel = quat_to_avel(np.concatenate((
+            self.long_motion_simulation_orientation,
+            [self.long_motion_simulation_orientation[0]]
+        )), self.long_motion.frame_time) * ANGULAR_BASIS
+        print(self.long_motion_angular_vel.shape)
 
         for i in range(self.long_motion.motion_length):
+            cur_simulation_translation = self.long_motion_simulation_translation[i]
             next_20 = (i + 20) % self.long_motion.motion_length
             next_40 = (i + 40) % self.long_motion.motion_length
+            next_60 = (i + 60) % self.long_motion.motion_length
+            next_80 = (i + 80) % self.long_motion.motion_length
+            next_100 = (i + 100) % self.long_motion.motion_length
             # NOTICE: 提前计算好需要匹配的向量，减少耗时
             self.long_motion_vectors[i] = np.concatenate((
-                self.long_motion_simulation_orientation[i],
+                # NOTICE: 朝向转为xz平面上的旋转角度进行对比更加有效！
+                [get_xz_angle(self.long_motion_simulation_orientation[i]) * ORIENTATION_BASIS],
                 self.long_motion_vel[i],
                 self.long_motion_angular_vel[i],
-                self.long_motion_simulation_orientation[next_20] * RESPONSIVENESS,
+                # 相对位移
+                (self.long_motion_simulation_translation[next_20] - cur_simulation_translation) * TRANSLATION_BASIS * RESPONSIVENESS,
+                [get_xz_angle(self.long_motion_simulation_orientation[next_20]) * ORIENTATION_BASIS * RESPONSIVENESS],
                 self.long_motion_vel[next_20] * RESPONSIVENESS,
                 self.long_motion_angular_vel[next_20] * RESPONSIVENESS,
-                self.long_motion_simulation_orientation[next_40] * RESPONSIVENESS,
+                # 相对位移
+                (self.long_motion_simulation_translation[next_40] - cur_simulation_translation) * TRANSLATION_BASIS * RESPONSIVENESS,
+                [get_xz_angle(self.long_motion_simulation_orientation[next_40]) * ORIENTATION_BASIS * RESPONSIVENESS],
                 self.long_motion_vel[next_40] * RESPONSIVENESS,
-                self.long_motion_angular_vel[next_40] * RESPONSIVENESS
+                self.long_motion_angular_vel[next_40] * RESPONSIVENESS,
+                # 相对位移
+                (self.long_motion_simulation_translation[next_60] - cur_simulation_translation) * TRANSLATION_BASIS * RESPONSIVENESS,
+                [get_xz_angle(self.long_motion_simulation_orientation[next_60]) * ORIENTATION_BASIS * RESPONSIVENESS],
+                self.long_motion_vel[next_60] * RESPONSIVENESS,
+                self.long_motion_angular_vel[next_60] * RESPONSIVENESS,
+                # 相对位移
+                (self.long_motion_simulation_translation[next_80] - cur_simulation_translation) * TRANSLATION_BASIS * RESPONSIVENESS,
+                [get_xz_angle(self.long_motion_simulation_orientation[next_80]) * ORIENTATION_BASIS * RESPONSIVENESS],
+                self.long_motion_vel[next_80] * RESPONSIVENESS,
+                self.long_motion_angular_vel[next_80] * RESPONSIVENESS,
+                # 相对位移
+                (self.long_motion_simulation_translation[next_100] - cur_simulation_translation) * TRANSLATION_BASIS * RESPONSIVENESS,
+                [get_xz_angle(self.long_motion_simulation_orientation[next_100]) * ORIENTATION_BASIS * RESPONSIVENESS],
+                self.long_motion_vel[next_100] * RESPONSIVENESS,
+                self.long_motion_angular_vel[next_100] * RESPONSIVENESS
             ))
         self.long_motion_tree = KDTree(self.long_motion_vectors)
 
@@ -199,6 +258,29 @@ class CharacterController():
             self.simulation_arrow.setQuat(self.controller.viewer.get_quat_from_forward_xz(
                 face_xz
             ))
+
+    def update_simulation_trajectory(self, cur_pos: np.ndarray, frame_no: int):
+        if self.simulation_arrow == None:
+            self.simulation_arrow = []
+            for i in range(6):
+                arrow = self.controller.viewer.create_arrow(
+                    cur_pos,
+                    np.array([0, 1]),
+                    width=0.03,
+                    length=0.3
+                )
+                self.simulation_arrow.append(arrow)
+
+        offset_translation = cur_pos - self.long_motion_simulation_translation[frame_no]
+        for i in range(6):
+            cur_frame_no = (frame_no + i * 20) % self.long_motion.motion_length
+            face_direction = R.from_quat(self.long_motion_simulation_orientation[cur_frame_no]).apply(np.array([0, 0, 1]))
+            translation = self.long_motion_simulation_translation[cur_frame_no] + offset_translation
+            self.simulation_arrow[i].setPos(*translation)
+            self.simulation_arrow[i].setQuat(self.controller.viewer.get_quat_from_forward_xz(
+                face_direction[[0, 2]]
+            ))
+
 
     def update_state_test(self,
                      desired_pos_list: np.ndarray,
@@ -265,6 +347,49 @@ class CharacterController():
 
         return joint_name, joint_translation, joint_orientation
 
+    def get_transition_motion(self, cur_pos: np.ndarray):
+        if self.motion_transition_frame > TRANSITION_FRAME_NUM:
+            return
+        # 过渡到目标帧时，切换过渡状态
+        if self.motion_transition_frame == TRANSITION_FRAME_NUM:
+            self.cur_frame = self.motion_transition_end
+            self.motion_transition = False
+        start_translation: np.ndarray = self.long_motion_translation[self.motion_transition_start].copy()
+        start_orientation: np.ndarray = self.long_motion_orientation[self.motion_transition_start]
+        end_translation: np.ndarray = self.long_motion_translation[self.motion_transition_end].copy()
+        end_orientation: np.ndarray = self.long_motion_orientation[self.motion_transition_end]
+        basis = self.motion_transition_frame / TRANSITION_FRAME_NUM
+        start_offset = cur_pos - self.long_motion_simulation_translation[self.motion_transition_start]
+        end_offset = cur_pos - self.long_motion_simulation_translation[self.motion_transition_end]
+        transition_orientation = np.zeros_like(start_orientation)
+
+        for i in range(len(start_translation)):
+            start_translation[i] += start_offset
+            end_translation[i] += end_offset
+            transition_orientation[i] = quat_linear_interpolation(start_orientation[i], end_orientation[i], basis)
+
+        transition_translation = start_translation * (1 - basis) + end_translation * basis
+        simulation_translation = (self.long_motion_simulation_translation[self.motion_transition_start] + start_offset) * (1 - basis) + (self.long_motion_simulation_translation[self.motion_transition_end] + end_offset) * basis
+        simulation_orientation = quat_linear_interpolation(
+            self.long_motion_simulation_orientation[self.motion_transition_start],
+            self.long_motion_simulation_orientation[self.motion_transition_end],
+            basis
+        )
+
+        self.motion_transition_frame += 1
+
+        return transition_translation, transition_orientation, simulation_translation, simulation_orientation
+
+    def motion_matching_transition(self, cur_pos: np.ndarray):
+        joint_translation, joint_orientation, simulation_translation, simulation_orientation = self.get_transition_motion(cur_pos)
+        self.cur_root_pos = joint_translation[0]
+        self.cur_root_rot = joint_orientation[0]
+
+        self.update_simulation_trajectory(cur_pos, self.motion_transition_end)
+
+        return self.long_motion.joint_name, joint_translation, joint_orientation
+
+
     def motion_matching(
             self,
             desired_pos_list: np.ndarray,
@@ -274,40 +399,74 @@ class CharacterController():
             current_gait
     ):
         # TODO: motion matching匹配最近邻动作的细节处理，比如long motion需不需要做朝向对齐；
-        self.long_motion
+        if self.motion_transition:
+            return self.motion_matching_transition(desired_pos_list[0])
         next_frame = self.cur_frame
         min_dist = 1e10
-        cur_simulation_v = np.concatenate((desired_rot_list[0], desired_vel_list[0], desired_avel_list[0]))
-        next_20_simulation_v = np.concatenate((desired_rot_list[1], desired_vel_list[1], desired_avel_list[1]))
-        next_40_simulation_v = np.concatenate((desired_rot_list[2], desired_vel_list[2], desired_avel_list[2]))
+        print("角速度：", desired_avel_list[0] * ANGULAR_BASIS)
+        cur_simulation_v = np.concatenate((
+            [get_xz_angle(desired_rot_list[0]) * ORIENTATION_BASIS],
+            desired_vel_list[0],
+            desired_avel_list[0] * ANGULAR_BASIS
+        ))
+        # cur_simulation_v = self.long_motion_vectors[self.cur_frame][0:10]
+        next_20_simulation_v = np.concatenate((
+            desired_pos_list[1] - desired_pos_list[0] * TRANSLATION_BASIS,
+            [get_xz_angle(desired_rot_list[1]) * ORIENTATION_BASIS],
+            desired_vel_list[1],
+            desired_avel_list[1] * ANGULAR_BASIS
+        ))
+        next_40_simulation_v = np.concatenate((
+            desired_pos_list[2] - desired_pos_list[0] * TRANSLATION_BASIS, # 相对位移
+            [get_xz_angle(desired_rot_list[2]) * ORIENTATION_BASIS],
+            desired_vel_list[2],
+            desired_avel_list[2] * ANGULAR_BASIS
+        ))
+        next_60_simulation_v = np.concatenate((
+            desired_pos_list[3] - desired_pos_list[0] * TRANSLATION_BASIS, # 相对位移
+            [get_xz_angle(desired_rot_list[3]) * ORIENTATION_BASIS],
+            desired_vel_list[3],
+            desired_avel_list[3] * ANGULAR_BASIS
+        ))
+        next_80_simulation_v = np.concatenate((
+            desired_pos_list[4] - desired_pos_list[0] * TRANSLATION_BASIS, # 相对位移
+            [get_xz_angle(desired_rot_list[4]) * ORIENTATION_BASIS],
+            desired_vel_list[4],
+            desired_avel_list[4] * ANGULAR_BASIS
+        ))
+        next_100_simulation_v = np.concatenate((
+            desired_pos_list[5] - desired_pos_list[0] * TRANSLATION_BASIS, # 相对位移
+            [get_xz_angle(desired_rot_list[5]) * ORIENTATION_BASIS],
+            desired_vel_list[5],
+            desired_avel_list[5] * ANGULAR_BASIS
+        ))
         simulation_v = np.concatenate((
             cur_simulation_v,
             next_20_simulation_v * RESPONSIVENESS,
-            next_40_simulation_v * RESPONSIVENESS
+            next_40_simulation_v * RESPONSIVENESS,
+            next_60_simulation_v * RESPONSIVENESS,
+            next_80_simulation_v * RESPONSIVENESS,
+            next_100_simulation_v * RESPONSIVENESS,
         ))
         # TODO: 需要用kd tree进行一下遍历的加速
         min_dist, next_frame = self.long_motion_tree.query(simulation_v)
-        # for i in range(self.long_motion.motion_length):
-        #     if i == self.cur_frame:
-        #         continue
-        #     # TODO: 对simulation bone和期望位置和速度进行匹配（或许还要加上角速度？），基于欧氏距离
-        #     next_20 = (i + 20) % self.long_motion.motion_length
-        #     next_40 = (i + 40) % self.long_motion.motion_length
-        #     cur_object_v = self.long_motion_vectors[i]
-        #     next_20_object_v = self.long_motion_vectors[next_20]
-        #     next_40_object_v = self.long_motion_vectors[next_40]
-        #     cur_dist = np.linalg.norm(cur_simulation_v - cur_object_v) + np.linalg.norm(next_20_simulation_v - next_20_object_v) + np.linalg.norm(next_40_simulation_v - next_40_object_v)
-        #     if cur_dist < min_dist:
-        #         min_dist = cur_dist
-        #         next_frame = i
+        dist = np.linalg.norm(self.long_motion_vectors[next_frame] - self.long_motion_vectors[self.cur_frame])
 
-        # FIXME: 这里适当放大近似动作的间隔可以改善动作loop的程度，但是总会出现跳动的情况？
-        if np.abs(next_frame - self.cur_frame) < 30:
+        print("cost: ", min_dist, " cur dist: ", dist)
+        # print("target: ", simulation_v)
+        # print("best: ", self.long_motion_vectors[next_frame])
+
+        # FIXME： 如何判断是同一个动作loop？直接用帧数序号来判断肯定是不对的
+        if dist < 20:
             self.cur_frame = (self.cur_frame + 1) % self.long_motion.motion_length
         else:
             # FIXME: 应该在动作发生明显变化的时候对动作进行插值？
-            print("动作变化：", next_frame)
-            self.cur_frame = next_frame
+            print("动作变化：", next_frame, "，匹配角速度：", self.long_motion_vectors[next_frame][7:10])
+            self.motion_transition = True
+            self.motion_transition_frame = 1
+            self.motion_transition_start = self.cur_frame
+            self.motion_transition_end = next_frame
+            return self.motion_matching_transition(desired_pos_list[0])
 
         joint_translation: np.ndarray = self.long_motion_translation[self.cur_frame].copy()
         joint_orientation: np.ndarray = self.long_motion_orientation[self.cur_frame]
@@ -320,11 +479,7 @@ class CharacterController():
         self.cur_root_pos = joint_translation[0]
         self.cur_root_rot = joint_orientation[0]
 
-        self.update_simulation_draw(
-            self.long_motion_simulation_translation[self.cur_frame] + offset_translation,
-            self.long_motion_simulation_orientation[self.cur_frame],
-            self.long_motion
-        )
+        self.update_simulation_trajectory(desired_pos_list[0], self.cur_frame)
 
         return self.long_motion.joint_name, joint_translation, joint_orientation
 
