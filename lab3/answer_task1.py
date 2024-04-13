@@ -119,7 +119,7 @@ def part3_cal_static_standing_torque(bvh: BVHMotion, physics_info: PhysicsInfo):
     # apply_joints = ["lHip", "lKnee", "lAnkle", "rHip", "rKnee", "rAnkle"]
     # 需要应用反馈关节力矩的关节列表
     apply_joints = ["lHip", "lKnee", "rHip", "rKnee"]
-    kp = 11000.0
+    kp = 10000.0
     kd = 500.0
     joint_positions = physics_info.get_joint_translation()
     joint_vel = physics_info.get_body_velocity()
@@ -142,19 +142,19 @@ def part3_cal_static_standing_torque(bvh: BVHMotion, physics_info: PhysicsInfo):
     com_vel = com_vel / total_mass
     com = com / total_mass
     # 适当前移
-    tar_pos[[0, 2]] = tar_pos[[0, 2]] * 0.6 + joint_positions[9][[0, 2]] * 0.2 + joint_positions[10][[0, 2]] * 0.2
+    tar_pos[[0, 2]] = tar_pos[[0, 2]] * 0.8 + joint_positions[9][[0, 2]] * 0.1 + joint_positions[10][[0, 2]] * 0.1
     # tar_pos[1] = 0
     root_pos = joint_positions[0]
     # root_pos[1] = 0
 
     torque = part1_cal_torque(pose, physics_info)
     # 雅克比虚拟反馈力
-    feedback_force = kp * (tar_pos - com) - kd * com_vel
+    feedback_force = kp * (tar_pos - root_pos) - kd * com_vel
 
     for name in apply_joints:
         # TODO: 不知道力的应用位置是质心还是根关节位置？
         joint_index = joint_name.index(name)
-        torque[joint_index] += np.cross(com - joint_positions[joint_index], feedback_force)
+        torque[joint_index] += np.cross(root_pos - joint_positions[joint_index], feedback_force)
 
     # print(com_vel, torque[r_ankle], torque[l_ankle])
 
