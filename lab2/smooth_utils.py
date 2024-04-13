@@ -37,7 +37,7 @@ def quat_to_avel(rot, dt):
     quat_diff = (rot[1:] - rot[:-1])/dt
     quat_diff[...,-1] = (1 - np.sum(quat_diff[...,:-1]**2, axis=-1)).clip(min = 0)**0.5
     quat_tmp = rot[:-1].copy()
-    quat_tmp[...,:3] *= -1
+    quat_tmp[...,:3] *= -1 # NOTICE: 单位四元数的特性，其逆等于其共轭，而单位四元数的共轭则是虚数部取负
     shape = quat_diff.shape[:-1]
     rot_tmp = R.from_quat(quat_tmp.reshape(-1, 4)) * R.from_quat(quat_diff.reshape(-1, 4))
     return 2 * rot_tmp.as_quat().reshape( shape + (4, ) )[...,:3]
